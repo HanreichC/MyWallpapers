@@ -455,20 +455,28 @@ function plan(ctx, F, fit) {
   L.slashX = R - Math.max(ctx.measureText(year).width, dayW) - 17 * b;
   ctx.letterSpacing = '0px';
   ctx.font = font(400, L.fs);
-  const leftW = (year || day ? L.slashX - 20 * b : R) - M;
+  const leftW = (year || day ? L.slashX - (album ? 50 : 20) * b : R) - M; // die große Titelliste braucht mehr Abstand zum Jahr
   let lines;
   if (album) { // Spalten von oben nach unten gefüllt, ab 11 Titeln zwei, ab 21 drei
     const list = trackList(v('tracks')), cols = Math.min(3, Math.ceil(list.length / 10)) || 1;
-    L.tracks = { list, rows: lines = Math.ceil(list.length / cols), cw: (leftW - (cols - 1) * 30 * b) / cols };
+    const cw = (leftW - (cols - 1) * 30 * b) / cols;
+    // Schrift so weit verkleinern, dass der längste Titel samt Nummer und Dauer in seine Spalte passt,
+    // aber nicht kleiner als die Spiel-Beschreibung (11); erst darunter wird mit "…" gekürzt
+    const need = 1.78 * L.fs + Math.max(0, ...list.map(([n, d]) => ctx.measureText(n).width + (d ? ctx.measureText(d).width + .67 * L.fs : 0)));
+    const k = Math.max(11 * b / L.fs, Math.min(1, cw / need));
+    L.fs *= k; L.cap *= k; L.step *= k;
+    L.tracks = { list, rows: lines = Math.ceil(list.length / cols), cw };
   } else lines = (L.desc = wrap(ctx, v('desc'), leftW)).length;
   L.blockTop = L.bottom - Math.max(45.6 * b, L.cap + (lines - 1) * L.step); // oben bündig mit dem Jahr
 
   if (album) { // Cover zentriert, höchstens 80 % der Satzspiegelbreite, damit Titel und Titelliste Luft haben; Titelliste bleibt unten bündig
     const room = L.blockTop - 36 * b - Math.max(titleRel, metaBottom) - 40 * h - M;
     L.iw = L.ih = Math.max(0, Math.min(.8 * CW, room));
-    L.imgTop = M + (room - L.ih) / 2; // übrigen Platz halb über das Cover, halb vor die Titelliste
+    // übriger Platz zu gleichen Dritteln über das Cover, zwischen Cover und Titel und vor die Titelliste (die unten bündig bleibt)
+    const spare = (room - L.ih) / 3;
+    L.imgTop = M + spare;
     L.imgX = M + (CW - L.iw) / 2;
-    L.barY = L.imgTop + L.ih + 40 * h;
+    L.barY = L.imgTop + L.ih + 40 * h + spare;
     L.titleY = L.barY + titleRel;
   } else { // Bildoberkante wie im Beispiel bei 2/7 der Höhe, tiefer bei langem Titel
     L.barY = 84;
@@ -551,7 +559,7 @@ function draw(ctx, s, o = 0, preview = false) {
       ctx.textAlign = 'right';
       ctx.fillText(dur, x + cw, y);
       ctx.textAlign = 'left';
-      ctx.fillText(ellipsis(ctx, name, cw - 32 * b - (dur ? ctx.measureText(dur).width + 12 * b : 0)), x + 32 * b, y);
+      ctx.fillText(ellipsis(ctx, name, cw - 1.78 * L.fs - (dur ? ctx.measureText(dur).width + .67 * L.fs : 0)), x + 1.78 * L.fs, y);
     });
   }
 
@@ -1305,6 +1313,13 @@ if (location.hash === '#selftest') (async () => {
       }
       $('size').value = '50x70';
       ok(plan(ctx, format(), 1).ih === .8 * CW, 'Album 50 × 70: Cover in voller Größe');
+      $('tracks').value = 'Kurz 1:00';
+      ok(plan(ctx, format(), 1).fs === 18, 'kurze Titel: volle Schrift');
+      $('tracks').value = Array.from({ length: 15 }, (_, i) => (i === 5 ? 'Bittersweet Poetry (feat. John Mayer)' : 'Song') + ' 4:32').join('\n');
+      const T = plan(ctx, format(), 1);
+      ctx.font = font(400, T.fs);
+      ok(T.fs < 18 && T.fs >= 11 && ctx.measureText('Bittersweet Poetry (feat. John Mayer)').width <= T.tracks.cw - 1.78 * T.fs - ctx.measureText('4:32').width - .67 * T.fs + 1e-6,
+        'lange Titel: Schrift verkleinert, nichts abgeschnitten (' + T.fs.toFixed(1) + ')');
     } finally { window.fetch = realFetch; document.body.dataset.mode = 'game'; }
     $('games').replaceChildren();
     document.title = 'SELFTEST OK';
