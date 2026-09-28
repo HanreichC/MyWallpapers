@@ -210,3 +210,7 @@ dialog .footnote { margin: 4px 0 12px; }
   main { grid-row: 1; padding: 16px; }
   aside { margin: 0 12px 12px; }
 }
+/* Format und Ausrichtung (Hoch | Quer) in einer Zeile */
+.formatRow { display: flex; align-items: center; gap: 8px; }
+.formatRow select { flex: 1; min-width: 0; }
+.formatRow .segmented label { min-width: 0; padding: 4px 10px; }

@@ -68,10 +68,14 @@
   <header>
     <a class="back" href="#">Übersicht</a>
     <div><h1><span data-only="game">Spiel-Poster</span><span data-only="album">Album-Poster</span><span data-only="film">Film- &amp; Serien-Poster</span></h1>
-      <select id="size" aria-label="Format">
+      <div class="formatRow"><select id="size" aria-label="Format">
         <optgroup label="DIN"><option value="a5">A5 · 14,8 × 21 cm</option><option value="a4">A4 · 21 × 29,7 cm</option><option value="a3">A3 · 29,7 × 42 cm</option><option value="a2">A2 · 42 × 59,4 cm</option><option value="a1">A1 · 59,4 × 84,1 cm</option></optgroup>
         <optgroup label="Poster"><option value="30x40">30 × 40 cm</option><option value="40x50">40 × 50 cm</option><option value="50x70" selected>50 × 70 cm</option><option value="60x90">60 × 90 cm</option><option value="70x100">70 × 100 cm</option></optgroup>
-      </select></div>
+      </select>
+      <div class="segmented" role="radiogroup" aria-label="Ausrichtung">
+        <input type="radio" name="orient" id="orientPortrait" checked><label for="orientPortrait">Hoch</label>
+        <input type="radio" name="orient" id="orientLandscape"><label for="orientLandscape">Quer</label>
+      </div></div></div>
   </header>
   <div class="toolbar" role="toolbar" aria-label="Projekt">
     <button type="button" id="newPoster" class="button">Neu</button>
