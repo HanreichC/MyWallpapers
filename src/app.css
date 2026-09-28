@@ -44,9 +44,11 @@ aside {
   -webkit-backdrop-filter: blur(40px) saturate(180%); backdrop-filter: blur(40px) saturate(180%);
   box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-shine);
 }
-/* Seiten: body[data-mode] wählt Start, Spiel oder Album, [data-only] blendet passend ein */
-body:not([data-mode=start]) [data-only=start], body:not([data-mode=game]) [data-only=game],
-body:not([data-mode=album]) [data-only=album], body[data-mode=start] > :is(aside, main) { display: none !important; }
+/* Seiten: body[data-mode] wählt Start, Spiel, Album oder Film & Serie, [data-only] blendet passend ein */
+/* data-only nennt eine oder mehrere Seiten ("game film") */
+body[data-mode=start] [data-only]:not([data-only~=start]), body[data-mode=game] [data-only]:not([data-only~=game]),
+body[data-mode=album] [data-only]:not([data-only~=album]), body[data-mode=film] [data-only]:not([data-only~=film]),
+body[data-mode=start] > :is(aside, main) { display: none !important; }
 
 /* Startseite: zwei Glas-Kacheln über farbigem Umgebungslicht */
 body[data-mode=start] { grid-template-columns: 1fr; grid-template-rows: auto; place-items: center; min-height: 100%; height: auto;

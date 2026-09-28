@@ -1,16 +1,20 @@
 # MyWallpapers
 
-Poster-Generator für Spiele und Musikalben, druckfertig von A5 bis 70 × 100 cm. Läuft direkt im Browser: `index.html` per Doppelklick öffnen, kein Server, keine Installation. Nur die Suche nach Spielen und Alben braucht Internet.
+Poster-Generator für Spiele, Musikalben, Filme und Serien, druckfertig von A5 bis 70 × 100 cm. Läuft direkt im Browser: `index.html` per Doppelklick öffnen, kein Server, keine Installation. Nur die Suche braucht Internet.
 
 > **Vibe-coded:** Dieses Projekt ist größtenteils mit KI (Claude Code) im Dialog entstanden, nicht klassisch von Hand programmiert. Der Code wird über einen eingebauten Selbsttest geprüft, ist aber nicht zeilenweise von Menschen reviewt. Nutzung auf eigenes Risiko.
 
 ## Funktionen
 
-Die Startseite bietet zwei Posterarten als Kacheln, direkt erreichbar über `index.html#spiel` bzw. `index.html#album`. Jede Seite merkt sich ihren eigenen Stand.
+Die Startseite bietet drei Posterarten als Kacheln, direkt erreichbar über `index.html#spiel`, `#album` und `#film`. Jede Seite merkt sich ihren eigenen Stand.
 
 - **Spiel**: Suche über Wikidata/Wikipedia, ohne Key. Füllt Titel, Entwickler, Genres, Datum und Beschreibung, lädt das Wikipedia-Cover als Platzhalter und das Logo von Steam bzw. Wikidata. Links zu Presskit, Alpha Coders, Google und Wallhaven helfen, ein hochauflösendes Bild zu finden.
 - **Album**: Suche über MusicBrainz, ohne Key, nach Albumtitel oder Künstler; ein Klick auf einen Künstler zeigt seine Diskografie. Füllt Album, Künstler, Label, Genres, Datum und die Titelliste mit Laufzeiten, lädt das Cover in Originalgröße aus dem Cover Art Archive. Die Titelliste steht unter dem Cover in bis zu drei Spalten; ihre Schrift wird kleiner, bis auch lange Titel ganz passen.
   Spotify wird nicht genutzt, weil dessen API immer einen Key verlangt.
+- **Film & Serie**: Umschalter Film | Serie, Layout wie beim Spiel-Poster.
+  - Filme über Wikidata/Wikipedia, ohne Key: Regie, Genres, Laufzeit, Datum, Handlung, Logo; bekannte Filme stehen in der Suche oben. Das Wikipedia-Plakat ist nur ein Platzhalter (~220 px); für hochauflösende Bilder gibt es Links zu TMDB, Alpha Coders, Google und Wallhaven.
+  - Serien über TVmaze, ohne Key: Sender, Genres, Staffeln, Datum, Handlung und ein Szenenbild bis Full HD (sonst das Plakat bis 1250 × 1800 px).
+  - TMDB, OMDb, Trakt und fanart.tv hätten bessere Filmbilder, verlangen aber alle einen Key; iTunes und IMDb sind aus dem Browser nicht abrufbar (kein CORS).
 - **Formate**: A5 bis A1 sowie 30 × 40, 40 × 50, 50 × 70, 60 × 90 und 70 × 100 cm. Export mit 300 dpi; die großen Formate liegen etwas darunter, weil ein Export höchstens 50 Megapixel hat (sonst stürzt der Browser ab). Kleine Formate bekommen relativ größere Schrift.
 - **Bildausschnitt**: in der Vorschau ziehen, zoomen mit Mausrad oder Regler, Pfeiltasten verschieben.
 - **Mit KI hochskalieren**: ESRGAN läuft lokal im Browser (WebGL) und rechnet zu kleine Bilder bis zur Druckauflösung hoch (max. 4×).
@@ -32,6 +36,7 @@ Abgefragte Dienste und ihre Datenlizenzen:
 | Steam (steamstatic.com) | Spiel-Logo | Rechte beim Publisher |
 | [MusicBrainz](https://musicbrainz.org) | Albumdaten, Titelliste | Kerndaten CC0, Genres CC BY-NC-SA 3.0 |
 | [Cover Art Archive](https://coverartarchive.org) | Albumcover | Rechte beim Label/Künstler |
+| [TVmaze](https://www.tvmaze.com) | Seriendaten, Szenenbilder, Plakate | Daten CC BY-SA 4.0, Bilder Rechte beim Sender/Studio |
 
 MusicBrainz erlaubt eine Anfrage pro Sekunde; die Albumsuche hält sich daran und ist deshalb etwas langsamer als die Spielesuche.
 

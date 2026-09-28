@@ -10,11 +10,11 @@
 <!-- Seiten per Hash statt eigener Dateien: Sandbox-Browser sehen beim Doppelklick nur diese eine Datei -->
 <!-- Hell/Dunkel: Startseite folgt dem System, die Editoren dem gespeicherten Poster (hier schon, damit nichts aufblitzt) -->
 <script>(() => {
-  const mode = { '#spiel': 'game', '#album': 'album', '#selftest': 'game' }[location.hash];
+  const mode = { '#spiel': 'game', '#album': 'album', '#film': 'film', '#selftest': 'game' }[location.hash];
   let light;
   document.body.dataset.mode = mode || 'start';
   onhashchange = () => location.reload();
-  try { light = mode ? JSON.parse(localStorage.getItem((mode === 'album' ? 'album-' : '') + 'poster')).themeLight : !matchMedia('(prefers-color-scheme: dark)').matches; } catch (e) {}
+  try { light = mode ? JSON.parse(localStorage.getItem((mode === 'game' ? '' : mode + '-') + 'poster')).themeLight : !matchMedia('(prefers-color-scheme: dark)').matches; } catch (e) {}
   document.documentElement.dataset.theme = light ? 'light' : 'dark';
 })();</script>
 <canvas id="ambient" aria-hidden="true"></canvas>
@@ -49,12 +49,25 @@
       <strong>Album</strong>
       <span>Cover, Künstler, Label und Titelliste. Daten von MusicBrainz.</span>
     </a>
+    <a class="tile" href="#film">
+      <svg viewBox="0 0 50 70" aria-hidden="true">
+        <defs><linearGradient id="gFilm" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0f2027"/><stop offset=".55" stop-color="#2c5364"/><stop offset="1" stop-color="#e0a458"/></linearGradient></defs>
+        <rect width="50" height="70" fill="#2b2b2b"/>
+        <g fill="#efe9dc"><rect x="5" y="4.2" width="1.7" height=".45" fill="#0f2027"/><rect x="6.7" y="4.2" width="1.7" height=".45" fill="#203a43"/><rect x="8.4" y="4.2" width="1.7" height=".45" fill="#2c5364"/><rect x="10.1" y="4.2" width="1.7" height=".45" fill="#b08d57"/><rect x="11.8" y="4.2" width="1.7" height=".45" fill="#e0a458"/>
+          <rect x="37" y="4.2" width="8" height=".6"/><rect x="39" y="5.6" width="6" height=".6"/><rect x="41" y="7" width="4" height=".6"/>
+          <rect x="5" y="12.5" width="20" height="3.6"/><rect x="5" y="17" width="24" height="2"/>
+          <rect x="5" y="59.5" width="27" height=".6"/><rect x="5" y="60.8" width="27" height=".6"/><rect x="5" y="62.1" width="16" height=".6"/><rect x="38" y="60" width="7" height="2.4"/></g>
+        <rect x="5" y="20.5" width="40" height="36.5" fill="url(#gFilm)"/>
+      </svg>
+      <strong>Film &amp; Serie</strong>
+      <span>Szenenbild, Regie oder Sender, Genres und Handlung. Daten von Wikidata und TVmaze.</span>
+    </a>
   </nav>
 </section>
 <aside>
   <header>
     <a class="back" href="#">Übersicht</a>
-    <div><h1><span data-only="game">Spiel-Poster</span><span data-only="album">Album-Poster</span></h1>
+    <div><h1><span data-only="game">Spiel-Poster</span><span data-only="album">Album-Poster</span><span data-only="film">Film- &amp; Serien-Poster</span></h1>
       <select id="size" aria-label="Format">
         <optgroup label="DIN"><option value="a5">A5 · 14,8 × 21 cm</option><option value="a4">A4 · 21 × 29,7 cm</option><option value="a3">A3 · 29,7 × 42 cm</option><option value="a2">A2 · 42 × 59,4 cm</option><option value="a1">A1 · 59,4 × 84,1 cm</option></optgroup>
         <optgroup label="Poster"><option value="30x40">30 × 40 cm</option><option value="40x50">40 × 50 cm</option><option value="50x70" selected>50 × 70 cm</option><option value="60x90">60 × 90 cm</option><option value="70x100">70 × 100 cm</option></optgroup>
@@ -66,7 +79,13 @@
     <button type="button" id="saveProject" class="button">Sichern…</button>
   </div>
   <form id="form" autocomplete="off">
-    <h2 data-only="game">Spiel</h2><h2 data-only="album">Album</h2>
+    <h2 data-only="game">Spiel</h2><h2 data-only="album">Album</h2><h2 data-only="film">Film oder Serie</h2>
+    <div class="group" data-only="film">
+      <div class="row"><span id="kindLabel">Art</span><div class="segmented" role="radiogroup" aria-labelledby="kindLabel">
+        <input type="radio" name="kind" id="kindFilm" checked><label for="kindFilm">Film</label>
+        <input type="radio" name="kind" id="kindSeries"><label for="kindSeries">Serie</label>
+      </div></div>
+    </div>
     <div class="group">
       <div class="row"><label for="game">Suchen</label><input id="game" type="search" placeholder="z. B. Hollow Knight" aria-describedby="gameStatus" aria-controls="games"></div>
       <div class="results" id="games" role="group" aria-label="Suchergebnisse"></div>
@@ -78,9 +97,10 @@
       <label class="file"><input type="file" id="image" accept="image/*" class="visually-hidden"><span class="button">Bild auswählen…</span><span id="imageName">oder in die Vorschau ziehen</span></label>
       <div class="row stack"><span id="searchLabel">Suchen in</span><div class="links" role="group" aria-labelledby="searchLabel">
         <a class="button" data-search="presskit" data-only="game" href="#" target="_blank" rel="noopener" title="Offizielles Artwork der Studios, meist höchste Qualität">Presskit ↗</a>
-        <a class="button" data-search="alphacoders" data-only="game" href="#" target="_blank" rel="noopener" title="Viele Spiele-Wallpaper, auf der Seite nach 4K+ filtern">Alpha Coders ↗</a>
+        <a class="button" data-search="tmdb" data-only="film" href="#" target="_blank" rel="noopener" title="The Movie Database: Plakate und Szenenbilder in hoher Auflösung">TMDB ↗</a>
+        <a class="button" data-search="alphacoders" data-only="game film" href="#" target="_blank" rel="noopener" title="Viele Spiele-Wallpaper, auf der Seite nach 4K+ filtern">Alpha Coders ↗</a>
         <a class="button" data-search="google" href="#" target="_blank" rel="noopener" title="Google Bilder, nur große Bilder">Google ↗</a>
-        <a class="button" data-search="wallhaven" data-only="game" href="#" target="_blank" rel="noopener" title="Fan-Art und Wallpaper ab 2400 px">Wallhaven ↗</a>
+        <a class="button" data-search="wallhaven" data-only="game film" href="#" target="_blank" rel="noopener" title="Fan-Art und Wallpaper ab 2400 px">Wallhaven ↗</a>
       </div></div>
       <div class="upscale"><button type="button" id="upscale" class="button" disabled>Mit KI hochskalieren</button><span id="upscaleInfo" aria-live="polite"></span>
         <progress id="upscaleProgress" hidden aria-label="Fortschritt Hochskalieren"></progress></div>
@@ -99,16 +119,17 @@
 
     <h2>Details</h2>
     <div class="group">
-      <div class="row"><label for="company"><span data-only="game">Company</span><span data-only="album">Label</span></label><input id="company" placeholder="z. B. Team Cherry"></div>
+      <div class="row"><label for="company"><span data-only="game">Company</span><span data-only="album">Label</span><span data-only="film" id="companyName">Regie</span></label><input id="company" placeholder="z. B. Team Cherry"></div>
       <div class="row"><label for="genres">Genres</label><textarea id="genres" rows="4" aria-describedby="genresHint" placeholder="Action&#10;Adventure"></textarea></div>
+      <div class="row" data-only="film"><label for="runtime" id="runtimeName">Laufzeit</label><input id="runtime" placeholder="148 Min."></div>
       <div class="row"><label for="year">Jahr</label><input id="year" placeholder="2017" inputmode="numeric"></div>
       <div class="row"><label for="day">Datum</label><input id="day" placeholder="Feb 24"></div>
-      <label class="file" data-only="game"><input type="file" id="logo" accept="image/*" class="visually-hidden"><span class="button">Logo auswählen…</span><span id="logoName">optional, PNG mit Transparenz</span></label>
+      <label class="file" data-only="game film"><input type="file" id="logo" accept="image/*" class="visually-hidden"><span class="button">Logo auswählen…</span><span id="logoName">optional, PNG mit Transparenz</span></label>
     </div>
     <p class="footnote" id="genresHint">Ein Genre pro Zeile.</p>
 
-    <h2 data-only="game">Beschreibung</h2>
-    <div class="group" data-only="game">
+    <h2 data-only="game film">Beschreibung</h2>
+    <div class="group" data-only="game film">
       <div class="row"><label for="desc">Text</label><textarea id="desc" rows="5" placeholder="Kurzbeschreibung, etwa 2–4 Zeilen auf dem Poster"></textarea></div>
     </div>
 
@@ -142,6 +163,7 @@
     <button type="button" id="export" class="primary">Als PNG exportieren</button>
     <p class="secondary"><span id="exportInfo">5906 × 8268 px</span> · Daten:
       <span data-only="game"><a href="https://www.wikidata.org" target="_blank" rel="noopener">Wikidata</a>, <a href="https://www.wikipedia.org" target="_blank" rel="noopener">Wikipedia</a></span>
+      <span data-only="film"><a href="https://www.wikidata.org" target="_blank" rel="noopener">Wikidata</a>, <a href="https://www.wikipedia.org" target="_blank" rel="noopener">Wikipedia</a>, <a href="https://www.tvmaze.com" target="_blank" rel="noopener">TVmaze</a></span>
       <span data-only="album"><a href="https://musicbrainz.org" target="_blank" rel="noopener">MusicBrainz</a>, <a href="https://coverartarchive.org" target="_blank" rel="noopener">Cover Art Archive</a></span></p>
   </footer>
 </aside>

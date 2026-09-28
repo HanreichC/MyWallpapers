@@ -8,7 +8,9 @@ const fontsReady = Promise.all([400, 700].map(w => document.fonts.load(font(w, 1
 const state = { image: null, logo: null, files: {}, dpi: 0, view: null, crowded: false };
 const MODE = document.body.dataset.mode; // start, game oder album (gesetzt im Kopf von index.html)
 const isAlbum = () => document.body.dataset.mode === 'album'; // live abgefragt, damit der Selbsttest beide Layouts prüfen kann
-const STORE = MODE === 'album' ? 'album-' : ''; // jede Seite speichert für sich; Spiel behält die alten Schlüssel
+const isFilm = () => document.body.dataset.mode === 'film'; // Film & Serie: Spiel-Layout, andere Quellen und Meta-Zeilen
+const isSeries = () => isFilm() && $('kindSeries').checked;
+const STORE = MODE === 'game' ? '' : MODE + '-'; // jede Seite speichert für sich; Spiel behält die alten Schlüssel
 
 // Formate (Breite × Höhe in cm). Alle Maße in plan() sind für 50 × 70 am Star-Wars-Beispiel gemessen (Faktor 1).
 // Kleinere Formate bekommen relativ größere Schrift, und zwar mit der Wurzel der Breite: kleine Drucke liest man
@@ -68,6 +70,7 @@ function plan(ctx, F, fit) {
   // Meta rechts, y ab Oberkante des Farbbalkens: "Label /" vor der ersten Zeile, Werte rechtsbündig; Versalhöhe bündig mit dem Balken
   let y = 8 * b, metaLeft = R, metaBottom = 0;
   const meta = album ? [['Label', v('company')], ['Genres', v('genres')], ['Laufzeit', runtime(v('tracks'))]]
+    : isFilm() ? [[isSeries() ? 'Sender' : 'Regie', v('company')], ['Genres', v('genres')], [isSeries() ? 'Staffeln' : 'Laufzeit', v('runtime')]]
     : [['Company', v('company')], ['Genres', v('genres')]];
   for (const [label, text] of meta) {
     const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
@@ -316,6 +319,11 @@ function render() {
       $('upscaleInfo').textContent = !state.image ? '' : need <= 1.05 ? 'Auflösung reicht bereits' : `≈ ${Math.round(state.dpi)} → ${Math.round(state.dpi * need)} dpi`;
     }
     document.documentElement.dataset.theme = $('themeLight').checked ? 'light' : 'dark'; // Oberfläche folgt dem Poster
+    if (isFilm()) { // Beschriftungen folgen dem Umschalter Film | Serie
+      $('companyName').textContent = isSeries() ? 'Sender' : 'Regie';
+      $('runtimeName').textContent = isSeries() ? 'Staffeln' : 'Laufzeit';
+      $('game').placeholder = isSeries() ? 'z. B. Breaking Bad' : 'z. B. Inception';
+    }
     const dpiEl = $('dpi');
     dpiEl.textContent = state.image ? `Bildauflösung im Druck: ≈ ${Math.round(state.dpi)} dpi` + (state.dpi < 150 ? ' – unscharf, mind. 150 dpi empfohlen' : '') : '';
     dpiEl.classList.toggle('warn', !!state.image && state.dpi < 150);
@@ -378,8 +386,8 @@ $('saveProject').onclick = async () => {
 };
 async function openProject(p) {
   if (p?.poster !== 1 || typeof p.fields !== 'object') throw new Error('Die Datei ist kein gültiges Poster-Projekt.');
-  const mode = p.mode === 'album' ? 'album' : 'game'; // ältere Projekte ohne mode sind Spiele
-  if (mode !== MODE) throw new Error(`Das ist ein ${mode === 'album' ? 'Album' : 'Spiel'}-Projekt. Bitte auf der Seite „${mode === 'album' ? 'Album' : 'Spiel'}“ öffnen.`);
+  const names = { game: 'Spiel', album: 'Album', film: 'Film & Serie' }, mode = names[p.mode] ? p.mode : 'game'; // ältere Projekte ohne mode sind Spiele
+  if (mode !== MODE) throw new Error(`Das ist ein Projekt für „${names[mode]}“. Bitte auf dieser Seite öffnen.`);
   newPoster();
   restore(p.fields);
   for (const k of ['image', 'logo']) {
@@ -474,6 +482,7 @@ function gameFields(g) {
     year: d ? String(d.getUTCFullYear()) : '',
     day: d ? shortDay(d) : '',
     website: g.website || '', // offizielle Seite, dort liegt meist das Presskit
+    runtime: g.runtime || '', // nur Film & Serie: Laufzeit bzw. Staffeln
   };
 }
 const shortDay = d => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
@@ -489,15 +498,21 @@ const claims = (e, p) => (e?.claims?.[p] || []).map(c => c.mainsnak?.datavalue?.
 const wdLabel = e => (e?.labels?.en || e?.labels?.mul || e?.labels?.de)?.value || '';
 const wdDate = e => claims(e, 'P577').filter(t => t.precision >= 9) // früheste Angabe mit der genauesten Präzision
   .sort((a, b) => b.precision - a.precision || a.time.localeCompare(b.time))[0];
-const genreName = s => s.replace(/ (video )?games?$/i, '').replace(/(^|[\s-])\S/g, c => c.toUpperCase()); // "racing video game" → "Racing"
-async function wikidataSearch(q) {
-  const ids = (await wd({ action: 'query', list: 'search', srsearch: q + ' haswbstatement:P31=Q7889', srlimit: 10 })).query.search.map(r => r.title);
+// "racing video game" → "Racing", "science fiction film" → "Science Fiction"
+const genreName = s => s.replace(/ ((video )?games?|films?)$/i, '').replace(/(^|[\s-])\S/g, c => c.toUpperCase());
+// film: Film, Animationsfilm, Animationsspielfilm, Spielfilm, Anime-Film (Wikidata kennt keine Unterklassen-Suche)
+async function wikidataSearch(q, film = false) {
+  const cls = film ? 'P31=Q11424|P31=Q202866|P31=Q29168811|P31=Q24869|P31=Q20650540' : 'P31=Q7889';
+  const ids = (await wd({ action: 'query', list: 'search', srsearch: q + ' haswbstatement:' + cls, srlimit: 10 })).query.search.map(r => r.title);
   if (!ids.length) return [];
   const { entities } = await wd({ action: 'wbgetentities', ids: ids.join('|'), props: 'labels|claims|sitelinks', languages: 'en|mul|de' });
-  return ids.map(id => entities[id]).filter(wdLabel).map(e => ({ name: wdLabel(e), info: wdDate(e)?.time.slice(1, 5), load: () => wikidataGame(e) }));
+  const hits = ids.map(id => entities[id]).filter(wdLabel);
+  // Filme: bekannteste zuerst (Zahl der Wikipedia-Sprachversionen), die Suche selbst reiht "toy story" 1995 sonst weit hinten ein
+  if (film) hits.sort((a, b) => Object.keys(b.sitelinks || {}).length - Object.keys(a.sitelinks || {}).length);
+  return hits.map(e => ({ name: wdLabel(e), info: wdDate(e)?.time.slice(1, 5), load: () => wikidataGame(e, film) }));
 }
-async function wikidataGame(e) {
-  const dev = claims(e, 'P178')[0]?.id, genres = claims(e, 'P136').map(v => v.id).slice(0, 6), logoFile = claims(e, 'P154')[0];
+async function wikidataGame(e, film = false) {
+  const dev = claims(e, film ? 'P57' : 'P178')[0]?.id, genres = claims(e, 'P136').map(v => v.id).slice(0, 6), logoFile = claims(e, 'P154')[0];
   const ids = [dev, ...genres].filter(Boolean);
   const [lang, page] = e.sitelinks?.enwiki ? ['en', e.sitelinks.enwiki.title] : e.sitelinks?.dewiki ? ['de', e.sitelinks.dewiki.title] : [];
   const [names, summary, logo] = await Promise.all([
@@ -507,7 +522,7 @@ async function wikidataGame(e) {
     logoFile ? wm('commons.wikimedia.org', { action: 'query', titles: 'File:' + logoFile, prop: 'imageinfo', iiprop: 'url', iiurlwidth: 1200 })
       .then(r => Object.values(r.query.pages)[0]?.imageinfo?.[0]?.thumburl, () => null) : null,
   ]);
-  const date = wdDate(e), steam = claims(e, 'P1733')[0];
+  const date = wdDate(e), steam = !film && claims(e, 'P1733')[0], minutes = claims(e, 'P2047')[0]; // Dauer in Minuten (Q7727) oder Sekunden
   const fields = gameFields({
     name: wdLabel(e),
     released: date?.precision >= 11 ? date.time.slice(1, 11) : undefined,
@@ -515,6 +530,7 @@ async function wikidataGame(e) {
     genres: [...new Set(genres.map(id => genreName(wdLabel(names[id]))).filter(Boolean))],
     description: summary.extract,
     website: claims(e, 'P856')[0],
+    runtime: film && minutes ? Math.round(+minutes.amount / (minutes.unit.endsWith('/Q11574') ? 60 : 1)) + ' Min.' : '',
   });
   if (!fields.year && date) fields.year = date.time.slice(1, 5);
   return {
@@ -604,6 +620,31 @@ function albumFields(a) {
   };
 }
 
+// Seriendaten: TVmaze (Sender, Genres, Staffeln, Beschreibung, Bilder bis 1250 × 1800 px). Frei, ohne Key, CORS offen
+async function tvmaze(path) {
+  const r = await fetch('https://api.tvmaze.com/' + path);
+  if (!r.ok) throw new Error(`TVmaze: Fehler ${r.status}.`);
+  return r.json();
+}
+const htmlText = html => new DOMParser().parseFromString((html || '').replace(/<\/p>/gi, '\n'), 'text/html').body.textContent;
+async function tvmazeSearch(q) {
+  return (await tvmaze('search/shows?' + new URLSearchParams({ q }))).map(({ show: s }) => ({ name: s.name, load: () => tvmazeShow(s.id),
+    info: [s.premiered?.slice(0, 4), (s.network || s.webChannel)?.name].filter(Boolean).join(' · ') }));
+}
+async function tvmazeShow(id) {
+  const [s, images] = await Promise.all([tvmaze(`shows/${id}?embed=seasons`), tvmaze(`shows/${id}/images`)]);
+  const seasons = (s._embedded?.seasons || []).filter(x => x.premiereDate).length; // angekündigte Staffeln ohne Start zählen nicht
+  // größtes Bild je Art; Szenenbild (ohne Schriftzug) zuerst, es passt besser ins Posterfeld als das Plakat mit Titel
+  const best = type => images.filter(i => i.type === type).map(i => i.resolutions?.original).filter(Boolean)
+    .sort((a, b) => b.width * b.height - a.width * a.height)[0]?.url;
+  return {
+    fields: gameFields({ name: s.name, released: s.premiered, developer: (s.network || s.webChannel)?.name, genres: s.genres,
+      description: htmlText(s.summary), website: s.officialSite, runtime: seasons ? String(seasons) : '' }),
+    covers: [['TVmaze-Hintergrund.jpg', best('background')], ['TVmaze-Poster.jpg', best('poster') || s.image?.original]].filter(c => c[1]),
+    logos: [], // TVmaze hat keine Logos; leere Liste räumt ein automatisch geladenes Logo vom vorigen Treffer weg
+  };
+}
+
 async function applyGame(load) {
   gameStatus('Wird geladen…');
   try {
@@ -615,7 +656,7 @@ async function applyGame(load) {
   } catch (err) { gameStatus(errText(err)); }
 }
 // Automatisch geladene Bilder ersetzen sich beim nächsten Treffer, eigene Uploads bleiben. sources: [[Name, URL], …], erste ladbare gewinnt
-const AUTO = new Set(['Wikipedia-Cover.jpg', 'Steam-Logo.png', 'Wikidata-Logo.png', 'Album-Cover.jpg']);
+const AUTO = new Set(['Wikipedia-Cover.jpg', 'Steam-Logo.png', 'Wikidata-Logo.png', 'Album-Cover.jpg', 'TVmaze-Hintergrund.jpg', 'TVmaze-Poster.jpg']);
 async function autoImage(key, sources) {
   if (state[key] && !AUTO.has($(key + 'Name').textContent)) return;
   clearImage(key);
@@ -637,6 +678,7 @@ const SEARCH = {
   },
   alphacoders: q => 'https://wall.alphacoders.com/search.php?' + new URLSearchParams({ search: q }),
   google: q => 'https://www.google.com/search?' + new URLSearchParams({ q: q + (isAlbum() ? ' album cover' : ' key art'), tbm: 'isch', tbs: 'isz:l' }),
+  tmdb: q => 'https://www.themoviedb.org/search?' + new URLSearchParams({ query: q }), // Plakate und Szenenbilder in hoher Auflösung, Download von Hand
   wallhaven: q => 'https://wallhaven.cc/search?' + new URLSearchParams({ q, categories: '111', purity: '100', atleast: '2400x2400', sorting: 'relevance' }),
 };
 document.querySelectorAll('[data-search]').forEach(a => a.onclick = () => {
@@ -649,11 +691,12 @@ let searchTimer, searchSeq = 0;
 async function searchGames(q) {
   const seq = ++searchSeq;
   let hits;
-  try { hits = await (isAlbum() ? albumSearch : wikidataSearch)(q); }
+  try { hits = await (isAlbum() ? albumSearch(q) : isSeries() ? tvmazeSearch(q) : wikidataSearch(q, isFilm())); }
   catch (err) { if (seq === searchSeq) gameStatus(errText(err)); return; }
   if (seq !== searchSeq) return; // Antwort auf eine ältere Eingabe
   showHits(hits);
-  gameStatus(hits.length ? undefined : isAlbum() ? 'Kein Album gefunden. Albumtitel oder Künstler versuchen.' : 'Kein Spiel gefunden. Englischen Originaltitel versuchen.');
+  gameStatus(hits.length ? undefined : isAlbum() ? 'Kein Album gefunden. Albumtitel oder Künstler versuchen.'
+    : `Kein${isSeries() ? 'e Serie' : isFilm() ? ' Film' : ' Spiel'} gefunden. Englischen Originaltitel versuchen.`);
 }
 // Treffer: Spiel/Album lädt die Daten, Künstler (h.albums) ersetzt die Liste durch seine Alben
 function showHits(hits) {
@@ -685,6 +728,7 @@ $('game').oninput = e => {
   if (q.length < 2) return gameStatus();
   searchTimer = setTimeout(() => searchGames(q), 350);
 };
+for (const id of ['kindFilm', 'kindSeries']) $(id).addEventListener('change', () => $('game').dispatchEvent(new Event('input')));
 $('game').onkeydown = e => {
   const first = $('games').firstElementChild;
   if (e.key === 'ArrowDown' && first) { e.preventDefault(); first.focus(); }
@@ -983,6 +1027,51 @@ if (location.hash === '#selftest') (async () => {
       ok(T.fs < 18 && T.fs >= 11 && ctx.measureText('Bittersweet Poetry (feat. John Mayer)').width <= T.tracks.cw - 1.78 * T.fs - ctx.measureText('4:32').width - .67 * T.fs + 1e-6,
         'lange Titel: Schrift verkleinert, nichts abgeschnitten (' + T.fs.toFixed(1) + ')');
     } finally { window.fetch = realFetch; document.body.dataset.mode = 'game'; }
+    $('games').replaceChildren();
+
+    // Film & Serie: Wikidata-Film (Regie, Laufzeit, bekannteste zuerst), TVmaze-Serie (Sender, Staffeln, Szenenbild vor Plakat)
+    ok(genreName('science fiction film') === 'Science Fiction' && genreName('racing video game') === 'Racing', 'Genres ohne "film"');
+    const tvShow = { id: 169, name: 'Breaking Bad', premiered: '2008-01-20', network: { name: 'AMC' }, genres: ['Drama', 'Crime'],
+      summary: '<p><b>Breaking Bad</b> follows a teacher.</p><p>Zweiter Absatz.</p>', officialSite: 'https://amc.com/bb',
+      _embedded: { seasons: [{ premiereDate: '2008-01-20' }, { premiereDate: '2009-03-08' }, { premiereDate: null }] } };
+    const tvImages = [{ type: 'poster', resolutions: { original: { url: 'https://tv/poster.jpg', width: 680, height: 1000 } } },
+      { type: 'background', resolutions: { original: { url: 'https://tv/klein.jpg', width: 1280, height: 720 } } },
+      { type: 'background', resolutions: { original: { url: 'https://tv/gross.jpg', width: 1920, height: 1080 } } }];
+    const film = id => ({ id, labels: { en: { value: id === 'F1' ? 'Toy Story' : 'Toy Story 4' } }, sitelinks: id === 'F1' ? { enwiki: { title: 'Toy Story' }, dewiki: {} } : { enwiki: { title: 'Toy Story 4' } },
+      claims: { P577: [v({ time: id === 'F1' ? '+1995-11-22T00:00:00Z' : '+2019-06-21T00:00:00Z', precision: 11 })], P57: [v({ id: 'D1' })], P136: [v({ id: 'G1' })],
+        P2047: [v({ amount: '+81', unit: 'http://www.wikidata.org/entity/Q7727' })], P1733: [v('123')] } });
+    const urls = [];
+    window.fetch = async url => {
+      const u = new URL(url), json = o => new Response(JSON.stringify(o));
+      urls.push(u);
+      if (u.hostname === 'api.tvmaze.com') return json(u.pathname.includes('search') ? [{ show: tvShow }] : u.pathname.endsWith('/images') ? tvImages : tvShow);
+      if (u.hostname.endsWith('wikipedia.org')) return json({ extract: 'Toy Story is a 1995 film.', originalimage: { source: 'https://upload.wikimedia.org/ts.jpg' } });
+      if (u.searchParams.get('list') === 'search') return json({ query: { search: [{ title: 'F4' }, { title: 'F1' }] } });
+      const ents = { F1: film('F1'), F4: film('F4'), D1: { labels: { en: { value: 'John Lasseter' } } }, G1: { labels: { en: { value: 'animated film' } } } };
+      return json({ entities: Object.fromEntries(u.searchParams.get('ids').split('|').map(id => [id, ents[id]])) });
+    };
+    document.body.dataset.mode = 'film';
+    try {
+      await searchGames('toy story');
+      ok($('games').firstChild.textContent === 'Toy Story1995' && urls.at(-1).searchParams.get('ids') === 'F4|F1'
+        && urls.find(u => u.searchParams.get('list') === 'search').searchParams.get('srsearch').includes('P31=Q20650540'), 'Filmsuche: bekanntester zuerst');
+      const f = await wikidataGame(film('F1'), true);
+      ok(f.fields.company === 'John Lasseter' && f.fields.runtime === '81 Min.' && f.fields.genres === 'Animated' && f.fields.day === 'Nov 22'
+        && !f.logos.length && f.covers[0][1] === 'https://upload.wikimedia.org/ts.jpg', 'Filmfelder (Regie, Laufzeit, kein Steam-Logo)');
+      $('kindSeries').checked = true;
+      await searchGames('breaking bad');
+      ok($('games').textContent === 'Breaking Bad2008 · AMC', 'TVmaze-Suche');
+      const t = await tvmazeShow(169);
+      ok(t.fields.title === 'Breaking Bad' && t.fields.company === 'AMC' && t.fields.runtime === '2' && t.fields.genres === 'Drama\nCrime'
+        && t.fields.desc === 'Breaking Bad follows a teacher.' && t.fields.year === '2008' && t.fields.day === 'Jan 20'
+        && t.covers.map(c => c[1]).join() === 'https://tv/gross.jpg,https://tv/poster.jpg' && Array.isArray(t.logos) && !t.logos.length, 'Seriendaten, Szenenbild vor Plakat');
+      Object.entries(t.fields).forEach(([k, x]) => $(k).value = x);
+      ok(plan(ctx, format(), 1).meta.map(m => m.label).join() === 'Sender,Genres,Staffeln', 'Meta-Zeilen Serie');
+      $('kindFilm').checked = true;
+      ok(plan(ctx, format(), 1).meta.map(m => m.label).join() === 'Regie,Genres,Laufzeit', 'Meta-Zeilen Film');
+      draw(ctx, preview.width / U);
+      ok(!state.crowded && state.view.iw === CW, 'Film-Poster im Spiel-Layout');
+    } finally { window.fetch = realFetch; document.body.dataset.mode = 'game'; $('kindFilm').checked = true; }
     $('games').replaceChildren();
     document.title = 'SELFTEST OK';
   } catch (e) { document.title = 'SELFTEST FAIL: ' + e.message; }
