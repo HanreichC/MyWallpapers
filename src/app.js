@@ -1,6 +1,8 @@
 const $ = id => document.getElementById(id);
 const U = 1000, M = 100, R = U - M, CW = U - 2 * M; // Layout in Einheiten: Breite = 1000, Höhe je nach Format
-const BG = '#2b2b2b', FG = '#efe9dc';
+// Posterfarben: dunkel (Anthrazit mit Leinen-Schrift) oder hell (warmes Papier-Beige mit Anthrazit-Schrift); frame: Fläche hinter dem Bild
+const THEMES = { dark: { bg: '#2b2b2b', fg: '#efe9dc', frame: '#000' }, light: { bg: '#efe7d7', fg: '#2b2b2b', frame: '#2b2b2b' } };
+const theme = () => THEMES[$('themeLight').checked ? 'light' : 'dark'];
 const font = (w, px) => `${w} ${px}px "TeX Gyre Heros", "Helvetica Neue", Helvetica, Arial, sans-serif`;
 const fontsReady = Promise.all([400, 700].map(w => document.fonts.load(font(w, 10)))); // Canvas wartet sonst nicht auf Webfonts
 const state = { image: null, logo: null, files: {}, dpi: 0, view: null, crowded: false };
@@ -157,14 +159,15 @@ function draw(ctx, s, o = 0, preview = false) {
   ctx.setTransform(s, 0, 0, s, o, o);
   ctx.imageSmoothingQuality = 'high';
   ctx.textBaseline = 'alphabetic';
-  ctx.fillStyle = BG;
+  const { bg, fg, frame } = theme();
+  ctx.fillStyle = bg;
   ctx.fillRect(0, 0, U, F.UH);
   document.querySelectorAll('.swatches input').forEach((c, i) => {
     ctx.fillStyle = c.value;
     ctx.fillRect(M + i * 34 * h, L.barY, 34.5 * h, 8.5 * h);
   });
 
-  ctx.fillStyle = FG;
+  ctx.fillStyle = fg;
   ctx.textAlign = 'right';
   for (const m of L.meta) {
     ctx.font = font(400, 11.3 * b);
@@ -194,7 +197,7 @@ function draw(ctx, s, o = 0, preview = false) {
   ctx.fillText(year, R, L.bottom - 13 * b);
   ctx.letterSpacing = '0px';
   if (year || day) {
-    ctx.strokeStyle = FG;
+    ctx.strokeStyle = fg;
     ctx.lineWidth = 3 * b;
     ctx.beginPath(); ctx.moveTo(L.slashX, L.bottom); ctx.lineTo(L.slashX + 11.4 * b, L.bottom - 45.6 * b); ctx.stroke();
   }
@@ -220,7 +223,7 @@ function draw(ctx, s, o = 0, preview = false) {
   // Bild im Rahmen. Zoom 1 = füllt den Rahmen, < 1 = kleiner als der Rahmen (Rest schwarz), > 1 = hineingezoomt.
   // cropX/cropY (0…1) positionieren das Bild im Spielraum (Rahmen- minus Bildbreite), egal ob es übersteht oder Luft hat
   const { imgX, imgTop, iw, ih } = L;
-  ctx.fillStyle = '#000';
+  ctx.fillStyle = frame;
   ctx.fillRect(imgX, imgTop, iw, ih);
   const img = state.image;
   state.view = null;
@@ -312,6 +315,7 @@ function render() {
       $('upscale').disabled = need <= 1.05;
       $('upscaleInfo').textContent = !state.image ? '' : need <= 1.05 ? 'Auflösung reicht bereits' : `≈ ${Math.round(state.dpi)} → ${Math.round(state.dpi * need)} dpi`;
     }
+    document.documentElement.dataset.theme = $('themeLight').checked ? 'light' : 'dark'; // Oberfläche folgt dem Poster
     const dpiEl = $('dpi');
     dpiEl.textContent = state.image ? `Bildauflösung im Druck: ≈ ${Math.round(state.dpi)} dpi` + (state.dpi < 150 ? ' – unscharf, mind. 150 dpi empfohlen' : '') : '';
     dpiEl.classList.toggle('warn', !!state.image && state.dpi < 150);
@@ -325,9 +329,9 @@ document.addEventListener('input', e => {
 // Speichern: Felder in localStorage, Bilder in IndexedDB (localStorage ist dafür zu klein), Projekte als Datei
 const SELFTEST = location.hash === '#selftest'; // Selbsttest darf gespeicherte Arbeit nicht überschreiben
 const saved = () => document.querySelectorAll('#form input[id]:not([type=file]):not(#game), #form textarea, #bleed, #format, #size');
-const snapshot = () => Object.fromEntries([...saved()].map(el => [el.id, el.type === 'checkbox' ? el.checked : el.value]));
+const snapshot = () => Object.fromEntries([...saved()].map(el => [el.id, /checkbox|radio/.test(el.type) ? el.checked : el.value]));
 function restore(data) {
-  for (const el of saved()) if (data && el.id in data) el[el.type === 'checkbox' ? 'checked' : 'value'] = data[el.id];
+  for (const el of saved()) if (data && el.id in data) el[/checkbox|radio/.test(el.type) ? 'checked' : 'value'] = data[el.id];
 }
 function idb(mode, op) {
   return new Promise((ok, fail) => {
@@ -762,7 +766,7 @@ const exportSize = () => { const F = format(), b = $('bleed').checked ? 2 * blee
 function renderFull() {
   const c = document.createElement('canvas'), ctx = c.getContext('2d'), F = format();
   [c.width, c.height] = exportSize();
-  ctx.fillStyle = BG;
+  ctx.fillStyle = theme().bg;
   ctx.fillRect(0, 0, c.width, c.height); // Beschnittzugabe in Hintergrundfarbe
   draw(ctx, F.px[0] / U, (c.width - F.px[0]) / 2);
   return c;
@@ -921,6 +925,10 @@ if (location.hash === '#selftest') (async () => {
     const c = renderFull();
     ok(c.width === EW + 70 && c.height === EH + 70 && c.getContext('2d').getImageData(0, 0, 1, 1).data[0] === 0x2b, 'Beschnitt');
     $('bleed').checked = false;
+    $('themeLight').checked = true; // heller Hintergrund inkl. Beschnitt, wird mit dem Projekt gespeichert
+    const lc = renderFull().getContext('2d').getImageData(0, 0, 1, 1).data;
+    ok(lc.join() === '239,231,215,255' && snapshot().themeLight === true && snapshot().themeDark === false, 'heller Hintergrund');
+    $('themeDark').checked = true;
 
     // Album: Titelliste, Laufzeit, MusicBrainz (simuliert), quadratisches, zentriertes Cover in jedem Format
     ok(clock(59) === '0:59' && clock(3725) === '1:02:05' && runtime('A 4:20\nB 1:00:05\nC') === '1:04:25' && runtime('A\nB') === '', 'Laufzeit');

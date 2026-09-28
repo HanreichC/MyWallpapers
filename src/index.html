@@ -8,7 +8,15 @@
 </head>
 <body>
 <!-- Seiten per Hash statt eigener Dateien: Sandbox-Browser sehen beim Doppelklick nur diese eine Datei -->
-<script>document.body.dataset.mode = { '#spiel': 'game', '#album': 'album', '#selftest': 'game' }[location.hash] || 'start'; onhashchange = () => location.reload();</script>
+<!-- Hell/Dunkel: Startseite folgt dem System, die Editoren dem gespeicherten Poster (hier schon, damit nichts aufblitzt) -->
+<script>(() => {
+  const mode = { '#spiel': 'game', '#album': 'album', '#selftest': 'game' }[location.hash];
+  let light;
+  document.body.dataset.mode = mode || 'start';
+  onhashchange = () => location.reload();
+  try { light = mode ? JSON.parse(localStorage.getItem((mode === 'album' ? 'album-' : '') + 'poster')).themeLight : !matchMedia('(prefers-color-scheme: dark)').matches; } catch (e) {}
+  document.documentElement.dataset.theme = light ? 'light' : 'dark';
+})();</script>
 <canvas id="ambient" aria-hidden="true"></canvas>
 <section class="start" data-only="start">
   <h1>Poster</h1>
@@ -111,6 +119,12 @@
     <p class="footnote" id="tracksHint" data-only="album">Ein Titel pro Zeile, Dauer optional am Ende.</p>
 
     <h2 id="colorsLabel">Farben</h2>
+    <div class="group">
+      <div class="row"><span id="themeLabel">Hintergrund</span><div class="segmented" role="radiogroup" aria-labelledby="themeLabel">
+        <input type="radio" name="theme" id="themeDark" checked><label for="themeDark">Dunkel</label>
+        <input type="radio" name="theme" id="themeLight"><label for="themeLight">Hell</label>
+      </div></div>
+    </div>
     <div class="group swatches" role="group" aria-labelledby="colorsLabel">
       <input type="color" id="color1" aria-label="Farbe 1" value="#444444">
       <input type="color" id="color2" aria-label="Farbe 2" value="#666666">

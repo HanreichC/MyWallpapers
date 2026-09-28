@@ -14,7 +14,7 @@ Die Startseite bietet zwei Posterarten als Kacheln, direkt erreichbar über `ind
 - **Formate**: A5 bis A1 sowie 30 × 40, 40 × 50, 50 × 70, 60 × 90 und 70 × 100 cm. Export mit 300 dpi; die großen Formate liegen etwas darunter, weil ein Export höchstens 50 Megapixel hat (sonst stürzt der Browser ab). Kleine Formate bekommen relativ größere Schrift.
 - **Bildausschnitt**: in der Vorschau ziehen, zoomen mit Mausrad oder Regler, Pfeiltasten verschieben.
 - **Mit KI hochskalieren**: ESRGAN läuft lokal im Browser (WebGL) und rechnet zu kleine Bilder bis zur Druckauflösung hoch (max. 4×).
-- **Farben**: fünf Farbfelder, automatisch aus dem Bild oder von Hand.
+- **Farben**: fünf Farbfelder, automatisch aus dem Bild oder von Hand. Hintergrund **Dunkel** (Anthrazit) oder **Hell** (warmes Papier-Beige); die Oberfläche des Generators wechselt mit.
 - **Speichern**: Eingaben und Bilder bleiben im Browser. **Sichern…** legt ein Projekt als `.poster.json` ab, **Öffnen…** lädt es wieder (auf der passenden Seite).
 - **Export** als PNG oder JPG, optional mit 3 mm Beschnitt für die Druckerei; die Datei enthält die dpi-Angabe.
 

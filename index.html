@@ -13,30 +13,29 @@
 /* Apple HIG, Liquid Glass: Inhalt (das Poster) zuerst, Bedienung schwebt als Glasebene darüber.
    Kein Glas auf Glas: Gruppen in der Seitenleiste sind dezente Flächen, nur die Seitenleiste ist Glas.
    Kapsel-Buttons, konzentrische Ecken (Panel 26 px − Innenabstand 14 px = Gruppen 12 px), getönt nur die Hauptaktion. */
+/* Hell/Dunkel über html[data-theme] (Startseite: System, Editoren: Posterhintergrund), nicht direkt über prefers-color-scheme */
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
   --bg: #e9e9ee; --solid: #f2f2f7; --label: #1d1d1f; --secondary: rgba(60, 60, 67, .64); --separator: rgba(60, 60, 67, .14);
   --glass: rgba(255, 255, 255, .56); --glass-edge: rgba(255, 255, 255, .75); --glass-shine: rgba(255, 255, 255, .6);
   --glass-shadow: 0 12px 40px rgba(0, 0, 0, .14), 0 1px 3px rgba(0, 0, 0, .08);
   --surface: rgba(255, 255, 255, .55); --control: rgba(120, 120, 128, .14); --control-hover: rgba(120, 120, 128, .24);
-  --menu: #ffffff; --accent: #007aff; --on: #34c759; --warn: #b25000; --ambient: .5;
+  --menu: #ffffff; --accent: #007aff; --on: #34c759; --warn: #b25000; --ambient: .5; --segment: #fff;
   --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%233c3c43' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #000; --solid: #1c1c1e; --label: #f5f5f7; --secondary: rgba(235, 235, 245, .64); --separator: rgba(235, 235, 245, .12);
-    --glass: rgba(30, 30, 32, .52); --glass-edge: rgba(255, 255, 255, .14); --glass-shine: rgba(255, 255, 255, .12);
-    --glass-shadow: 0 12px 40px rgba(0, 0, 0, .55), 0 1px 2px rgba(0, 0, 0, .4);
-    --surface: rgba(255, 255, 255, .06); --control: rgba(120, 120, 128, .3); --control-hover: rgba(120, 120, 128, .42);
-    --menu: #2c2c2e; --accent: #0a84ff; --on: #30d158; --warn: #ff9f0a; --ambient: .9;
-    --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23ebebf5' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-  }
+:root[data-theme=dark] {
+  color-scheme: dark;
+  --bg: #000; --solid: #1c1c1e; --label: #f5f5f7; --secondary: rgba(235, 235, 245, .64); --separator: rgba(235, 235, 245, .12);
+  --glass: rgba(30, 30, 32, .52); --glass-edge: rgba(255, 255, 255, .14); --glass-shine: rgba(255, 255, 255, .12);
+  --glass-shadow: 0 12px 40px rgba(0, 0, 0, .55), 0 1px 2px rgba(0, 0, 0, .4);
+  --surface: rgba(255, 255, 255, .06); --control: rgba(120, 120, 128, .3); --control-hover: rgba(120, 120, 128, .42);
+  --menu: #2c2c2e; --accent: #0a84ff; --on: #30d158; --warn: #ff9f0a; --ambient: .9;
+  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23ebebf5' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  --segment: #636366;
 }
 @media (prefers-contrast: more) {
   :root { --separator: rgba(60, 60, 67, .45); --glass-edge: rgba(0, 0, 0, .35); --secondary: rgba(60, 60, 67, .85); }
-  @media (prefers-color-scheme: dark) {
-    :root { --separator: rgba(235, 235, 245, .4); --glass-edge: rgba(255, 255, 255, .5); --secondary: rgba(235, 235, 245, .85); }
-  }
+  :root[data-theme=dark] { --separator: rgba(235, 235, 245, .4); --glass-edge: rgba(255, 255, 255, .5); --secondary: rgba(235, 235, 245, .85); }
 }
 
 * { box-sizing: border-box; }
@@ -86,7 +85,9 @@ h1 { font-size: 22px; font-weight: 700; letter-spacing: -.01em; margin: 0 0 8px;
 .secondary { color: var(--secondary); margin: 2px 0 0; }
 a { color: var(--accent); }
 a.button { text-decoration: none; }
-form { flex: 1; overflow-y: auto; padding: 4px 14px 20px; scrollbar-width: thin; scrollbar-color: var(--control-hover) transparent; }
+/* position: relative, damit versteckte Eingabefelder (Radio, Datei) mitscrollen; sonst hängen sie an der Seitenleiste und der Fokus
+   beim Klick scrollt die ganze Leiste weg */
+form { position: relative; flex: 1; overflow-y: auto; padding: 4px 14px 20px; scrollbar-width: thin; scrollbar-color: var(--control-hover) transparent; }
 h2 { font-size: 13px; font-weight: 600; margin: 18px 8px 6px; }
 .group { background: var(--surface); border-radius: 12px; }
 .row { display: grid; grid-template-columns: 92px 1fr; gap: 8px; align-items: baseline; padding: 9px 12px; border-radius: 12px; }
@@ -134,6 +135,16 @@ select {
 }
 select:hover { background-color: var(--control-hover); }
 select option, select optgroup { background: var(--menu); color: var(--label); }
+
+/* Segmented Control im iOS-Stil: gewähltes Segment als erhabene Kapsel */
+.segmented { display: inline-flex; justify-self: start; padding: 2px; gap: 2px; border-radius: 999px; background: var(--control); }
+.segmented input[type=radio] { position: absolute; width: 1px; height: 1px; margin: 0; opacity: 0; pointer-events: none; }
+.segmented label { min-width: 76px; padding: 4px 14px; border-radius: 999px; text-align: center; font-weight: 500;
+  color: var(--secondary); transition: background .2s, color .2s, box-shadow .2s; }
+.segmented input:checked + label { background: var(--segment); color: var(--label);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .16), inset 0 .5px 0 rgba(255, 255, 255, .5); }
+.segmented input:focus-visible + label { outline: 3px solid color-mix(in srgb, var(--accent) 50%, transparent); outline-offset: 1px; }
+.group + .group { margin-top: 8px; }
 
 /* Schalter im iOS-Stil */
 input[role=switch] {
@@ -195,7 +206,15 @@ main.drag::after { content: "Bild hier ablegen"; position: absolute; inset: 20px
 </head>
 <body>
 <!-- Seiten per Hash statt eigener Dateien: Sandbox-Browser sehen beim Doppelklick nur diese eine Datei -->
-<script>document.body.dataset.mode = { '#spiel': 'game', '#album': 'album', '#selftest': 'game' }[location.hash] || 'start'; onhashchange = () => location.reload();</script>
+<!-- Hell/Dunkel: Startseite folgt dem System, die Editoren dem gespeicherten Poster (hier schon, damit nichts aufblitzt) -->
+<script>(() => {
+  const mode = { '#spiel': 'game', '#album': 'album', '#selftest': 'game' }[location.hash];
+  let light;
+  document.body.dataset.mode = mode || 'start';
+  onhashchange = () => location.reload();
+  try { light = mode ? JSON.parse(localStorage.getItem((mode === 'album' ? 'album-' : '') + 'poster')).themeLight : !matchMedia('(prefers-color-scheme: dark)').matches; } catch (e) {}
+  document.documentElement.dataset.theme = light ? 'light' : 'dark';
+})();</script>
 <canvas id="ambient" aria-hidden="true"></canvas>
 <section class="start" data-only="start">
   <h1>Poster</h1>
@@ -298,6 +317,12 @@ main.drag::after { content: "Bild hier ablegen"; position: absolute; inset: 20px
     <p class="footnote" id="tracksHint" data-only="album">Ein Titel pro Zeile, Dauer optional am Ende.</p>
 
     <h2 id="colorsLabel">Farben</h2>
+    <div class="group">
+      <div class="row"><span id="themeLabel">Hintergrund</span><div class="segmented" role="radiogroup" aria-labelledby="themeLabel">
+        <input type="radio" name="theme" id="themeDark" checked><label for="themeDark">Dunkel</label>
+        <input type="radio" name="theme" id="themeLight"><label for="themeLight">Hell</label>
+      </div></div>
+    </div>
     <div class="group swatches" role="group" aria-labelledby="colorsLabel">
       <input type="color" id="color1" aria-label="Farbe 1" value="#444444">
       <input type="color" id="color2" aria-label="Farbe 2" value="#666666">
@@ -346,7 +371,9 @@ window.ESRGAN_X4 = {"modelTopology":{"keras_version":"2.10.0","backend":"tensorf
 <script>
 const $ = id => document.getElementById(id);
 const U = 1000, M = 100, R = U - M, CW = U - 2 * M; // Layout in Einheiten: Breite = 1000, Höhe je nach Format
-const BG = '#2b2b2b', FG = '#efe9dc';
+// Posterfarben: dunkel (Anthrazit mit Leinen-Schrift) oder hell (warmes Papier-Beige mit Anthrazit-Schrift); frame: Fläche hinter dem Bild
+const THEMES = { dark: { bg: '#2b2b2b', fg: '#efe9dc', frame: '#000' }, light: { bg: '#efe7d7', fg: '#2b2b2b', frame: '#2b2b2b' } };
+const theme = () => THEMES[$('themeLight').checked ? 'light' : 'dark'];
 const font = (w, px) => `${w} ${px}px "TeX Gyre Heros", "Helvetica Neue", Helvetica, Arial, sans-serif`;
 const fontsReady = Promise.all([400, 700].map(w => document.fonts.load(font(w, 10)))); // Canvas wartet sonst nicht auf Webfonts
 const state = { image: null, logo: null, files: {}, dpi: 0, view: null, crowded: false };
@@ -503,14 +530,15 @@ function draw(ctx, s, o = 0, preview = false) {
   ctx.setTransform(s, 0, 0, s, o, o);
   ctx.imageSmoothingQuality = 'high';
   ctx.textBaseline = 'alphabetic';
-  ctx.fillStyle = BG;
+  const { bg, fg, frame } = theme();
+  ctx.fillStyle = bg;
   ctx.fillRect(0, 0, U, F.UH);
   document.querySelectorAll('.swatches input').forEach((c, i) => {
     ctx.fillStyle = c.value;
     ctx.fillRect(M + i * 34 * h, L.barY, 34.5 * h, 8.5 * h);
   });
 
-  ctx.fillStyle = FG;
+  ctx.fillStyle = fg;
   ctx.textAlign = 'right';
   for (const m of L.meta) {
     ctx.font = font(400, 11.3 * b);
@@ -540,7 +568,7 @@ function draw(ctx, s, o = 0, preview = false) {
   ctx.fillText(year, R, L.bottom - 13 * b);
   ctx.letterSpacing = '0px';
   if (year || day) {
-    ctx.strokeStyle = FG;
+    ctx.strokeStyle = fg;
     ctx.lineWidth = 3 * b;
     ctx.beginPath(); ctx.moveTo(L.slashX, L.bottom); ctx.lineTo(L.slashX + 11.4 * b, L.bottom - 45.6 * b); ctx.stroke();
   }
@@ -566,7 +594,7 @@ function draw(ctx, s, o = 0, preview = false) {
   // Bild im Rahmen. Zoom 1 = füllt den Rahmen, < 1 = kleiner als der Rahmen (Rest schwarz), > 1 = hineingezoomt.
   // cropX/cropY (0…1) positionieren das Bild im Spielraum (Rahmen- minus Bildbreite), egal ob es übersteht oder Luft hat
   const { imgX, imgTop, iw, ih } = L;
-  ctx.fillStyle = '#000';
+  ctx.fillStyle = frame;
   ctx.fillRect(imgX, imgTop, iw, ih);
   const img = state.image;
   state.view = null;
@@ -658,6 +686,7 @@ function render() {
       $('upscale').disabled = need <= 1.05;
       $('upscaleInfo').textContent = !state.image ? '' : need <= 1.05 ? 'Auflösung reicht bereits' : `≈ ${Math.round(state.dpi)} → ${Math.round(state.dpi * need)} dpi`;
     }
+    document.documentElement.dataset.theme = $('themeLight').checked ? 'light' : 'dark'; // Oberfläche folgt dem Poster
     const dpiEl = $('dpi');
     dpiEl.textContent = state.image ? `Bildauflösung im Druck: ≈ ${Math.round(state.dpi)} dpi` + (state.dpi < 150 ? ' – unscharf, mind. 150 dpi empfohlen' : '') : '';
     dpiEl.classList.toggle('warn', !!state.image && state.dpi < 150);
@@ -671,9 +700,9 @@ document.addEventListener('input', e => {
 // Speichern: Felder in localStorage, Bilder in IndexedDB (localStorage ist dafür zu klein), Projekte als Datei
 const SELFTEST = location.hash === '#selftest'; // Selbsttest darf gespeicherte Arbeit nicht überschreiben
 const saved = () => document.querySelectorAll('#form input[id]:not([type=file]):not(#game), #form textarea, #bleed, #format, #size');
-const snapshot = () => Object.fromEntries([...saved()].map(el => [el.id, el.type === 'checkbox' ? el.checked : el.value]));
+const snapshot = () => Object.fromEntries([...saved()].map(el => [el.id, /checkbox|radio/.test(el.type) ? el.checked : el.value]));
 function restore(data) {
-  for (const el of saved()) if (data && el.id in data) el[el.type === 'checkbox' ? 'checked' : 'value'] = data[el.id];
+  for (const el of saved()) if (data && el.id in data) el[/checkbox|radio/.test(el.type) ? 'checked' : 'value'] = data[el.id];
 }
 function idb(mode, op) {
   return new Promise((ok, fail) => {
@@ -1108,7 +1137,7 @@ const exportSize = () => { const F = format(), b = $('bleed').checked ? 2 * blee
 function renderFull() {
   const c = document.createElement('canvas'), ctx = c.getContext('2d'), F = format();
   [c.width, c.height] = exportSize();
-  ctx.fillStyle = BG;
+  ctx.fillStyle = theme().bg;
   ctx.fillRect(0, 0, c.width, c.height); // Beschnittzugabe in Hintergrundfarbe
   draw(ctx, F.px[0] / U, (c.width - F.px[0]) / 2);
   return c;
@@ -1267,6 +1296,10 @@ if (location.hash === '#selftest') (async () => {
     const c = renderFull();
     ok(c.width === EW + 70 && c.height === EH + 70 && c.getContext('2d').getImageData(0, 0, 1, 1).data[0] === 0x2b, 'Beschnitt');
     $('bleed').checked = false;
+    $('themeLight').checked = true; // heller Hintergrund inkl. Beschnitt, wird mit dem Projekt gespeichert
+    const lc = renderFull().getContext('2d').getImageData(0, 0, 1, 1).data;
+    ok(lc.join() === '239,231,215,255' && snapshot().themeLight === true && snapshot().themeDark === false, 'heller Hintergrund');
+    $('themeDark').checked = true;
 
     // Album: Titelliste, Laufzeit, MusicBrainz (simuliert), quadratisches, zentriertes Cover in jedem Format
     ok(clock(59) === '0:59' && clock(3725) === '1:02:05' && runtime('A 4:20\nB 1:00:05\nC') === '1:04:25' && runtime('A\nB') === '', 'Laufzeit');
