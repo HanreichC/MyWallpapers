@@ -4,6 +4,9 @@ const BG = '#2b2b2b', FG = '#efe9dc';
 const font = (w, px) => `${w} ${px}px "TeX Gyre Heros", "Helvetica Neue", Helvetica, Arial, sans-serif`;
 const fontsReady = Promise.all([400, 700].map(w => document.fonts.load(font(w, 10)))); // Canvas wartet sonst nicht auf Webfonts
 const state = { image: null, logo: null, files: {}, dpi: 0, view: null, crowded: false };
+const MODE = document.body.dataset.mode; // start, game oder album (gesetzt im Kopf von index.html)
+const isAlbum = () => document.body.dataset.mode === 'album'; // live abgefragt, damit der Selbsttest beide Layouts prüfen kann
+const STORE = MODE === 'album' ? 'album-' : ''; // jede Seite speichert für sich; Spiel behält die alten Schlüssel
 
 // Formate (Breite × Höhe in cm). Alle Maße in plan() sind für 50 × 70 am Star-Wars-Beispiel gemessen (Faktor 1).
 // Kleinere Formate bekommen relativ größere Schrift, und zwar mit der Wurzel der Breite: kleine Drucke liest man
@@ -37,15 +40,34 @@ function wrap(ctx, text, maxW) {
   }
   return out;
 }
+function ellipsis(ctx, text, maxW) {
+  if (ctx.measureText(text).width <= maxW) return text;
+  while (text && ctx.measureText(text + '…').width > maxW) text = text.slice(0, -1);
+  return text.trimEnd() + '…';
+}
 
-// Misst alle Texte aus und verteilt sie. b/h: Faktor für Fließtext/Titel; fit < 1 verkleinert alles, wenn das Bild sonst zu klein würde
+// Titelliste: eine Zeile pro Titel, Dauer (m:ss oder h:mm:ss) optional am Ende → [[Name, Dauer], …]
+const trackList = text => text.split('\n').map(l => l.trim()).filter(Boolean)
+  .map(l => { const m = l.match(/^(.*?)\s+(\d+:\d\d(?::\d\d)?)$/); return m ? [m[1], m[2]] : [l, '']; });
+const clock = s => (s >= 3600 ? [Math.floor(s / 3600), Math.floor(s / 60) % 60] : [Math.floor(s / 60)])
+  .map((n, i) => i ? String(n).padStart(2, '0') : n).join(':') + ':' + String(s % 60).padStart(2, '0');
+const runtime = text => {
+  const s = trackList(text).reduce((sum, [, d]) => sum + (d ? d.split(':').reduce((a, n) => a * 60 + +n, 0) : 0), 0);
+  return s ? clock(s) : '';
+};
+
+// Misst alle Texte aus und verteilt sie. b/h: Faktor für Fließtext/Titel; fit < 1 verkleinert alles, wenn das Bild sonst zu klein würde.
+// Spiel: Kopf (Farbbalken, Meta, Titel) über dem Bild. Album: quadratisches Cover oben, Kopf darunter, Titelliste statt Beschreibung
 function plan(ctx, F, fit) {
-  const v = id => $(id).value, b = F.t * fit, h = F.t ** .6 * fit;
-  const L = { b, h, meta: [], title: [], bottom: F.UH - M };
+  const v = id => $(id).value, b = F.t * fit, h = F.t ** .6 * fit, album = isAlbum();
+  // fs/cap/step: Schrift, Versalhöhe und Zeilenabstand unten links; die Titelliste ist größer als die Spiel-Beschreibung
+  const L = { b, h, meta: [], title: [], bottom: F.UH - M, fs: (album ? 18 : 11) * b, cap: (album ? 13 : 7.9) * b, step: (album ? 24 : 12.5) * b };
 
-  // Meta rechts oben: "Label /" vor der ersten Zeile, Werte rechtsbündig; Versalhöhe bündig mit dem Farbbalken
-  let y = 84 + 8 * b, metaLeft = R, metaBottom = 0;
-  for (const [label, text] of [['Company', v('company')], ['Genres', v('genres')]]) {
+  // Meta rechts, y ab Oberkante des Farbbalkens: "Label /" vor der ersten Zeile, Werte rechtsbündig; Versalhöhe bündig mit dem Balken
+  let y = 8 * b, metaLeft = R, metaBottom = 0;
+  const meta = album ? [['Label', v('company')], ['Genres', v('genres')], ['Laufzeit', runtime(v('tracks'))]]
+    : [['Company', v('company')], ['Genres', v('genres')]];
+  for (const [label, text] of meta) {
     const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
     if (!lines.length) continue;
     ctx.font = font(400, 11.3 * b);
@@ -58,7 +80,7 @@ function plan(ctx, F, fit) {
   }
 
   // Titel + Untertitel, rechts Platz fürs Logo; Laufweite: Helvetica Neue läuft ~3 % enger als Heros
-  const logo = state.logo;
+  const logo = !album && state.logo;
   L.ls = logo ? Math.min(110 * h / logo.width, 28 * h / logo.height) : 0;
   const tw = CW - (logo ? logo.width * L.ls + 20 * h : 0);
   for (const [size, text] of [[85, v('title')], [50, v('subtitle')]]) {
@@ -71,14 +93,14 @@ function plan(ctx, F, fit) {
     wrap(ctx, text, tw).forEach((line, i) => L.title.push({ px, line, w: ctx.measureText(line).width, adv: px + (i ? 0 : 2 * h) }));
   }
   ctx.letterSpacing = '0px';
-  // Bildoberkante wie im Beispiel bei 2/7 der Höhe; tiefer, wenn der Titel sonst in Farbbalken oder Meta-Block ragt
-  L.imgTop = 400 / 1400 * F.UH;
+  // Letzte Titel-Grundlinie ab Balkenoberkante: so tief, dass keine Zeile in Farbbalken oder Meta-Block ragt
+  let titleRel = 0;
   for (let i = L.title.length - 1, off = 0; i >= 0; off += L.title[i--].adv) { // off: letzte Grundlinie → Grundlinie dieser Zeile
-    const t = L.title[i], above = M + t.w > metaLeft - 8 * b ? metaBottom + 8 * b : 84 + 20 * h;
-    L.imgTop = Math.max(L.imgTop, above + off + t.px * .72 + 23 * h);
+    const t = L.title[i], above = M + t.w > metaLeft - 8 * b ? metaBottom + 8 * b : 20 * h;
+    titleRel = Math.max(titleRel, above + off + t.px * .72);
   }
 
-  // Unten: Beschreibung links, "/Jahr Datum" rechts, beides an der Grundlinie
+  // Unten: Beschreibung bzw. Titelliste links, "/Jahr Datum" rechts, beides an der Grundlinie
   const year = v('year'), day = v('day');
   ctx.font = font(400, 14 * b);
   const dayW = ctx.measureText(day).width;
@@ -86,10 +108,29 @@ function plan(ctx, F, fit) {
   ctx.letterSpacing = -2.8 * b + 'px'; // Heros-Ziffern sind breiter als die von Helvetica Neue
   L.slashX = R - Math.max(ctx.measureText(year).width, dayW) - 17 * b;
   ctx.letterSpacing = '0px';
-  ctx.font = font(400, 11 * b);
-  L.desc = wrap(ctx, v('desc'), (year || day ? L.slashX - 20 * b : R) - M);
-  L.blockTop = L.bottom - Math.max(45.6 * b, 7.9 * b + (L.desc.length - 1) * 12.5 * b); // oben bündig mit dem Jahr
-  L.ih = L.blockTop - 24 * b - L.imgTop;
+  ctx.font = font(400, L.fs);
+  const leftW = (year || day ? L.slashX - 20 * b : R) - M;
+  let lines;
+  if (album) { // Spalten von oben nach unten gefüllt, ab 11 Titeln zwei, ab 21 drei
+    const list = trackList(v('tracks')), cols = Math.min(3, Math.ceil(list.length / 10)) || 1;
+    L.tracks = { list, rows: lines = Math.ceil(list.length / cols), cw: (leftW - (cols - 1) * 30 * b) / cols };
+  } else lines = (L.desc = wrap(ctx, v('desc'), leftW)).length;
+  L.blockTop = L.bottom - Math.max(45.6 * b, L.cap + (lines - 1) * L.step); // oben bündig mit dem Jahr
+
+  if (album) { // Cover zentriert, höchstens 80 % der Satzspiegelbreite, damit Titel und Titelliste Luft haben; Titelliste bleibt unten bündig
+    const room = L.blockTop - 36 * b - Math.max(titleRel, metaBottom) - 40 * h - M;
+    L.iw = L.ih = Math.max(0, Math.min(.8 * CW, room));
+    L.imgTop = M + (room - L.ih) / 2; // übrigen Platz halb über das Cover, halb vor die Titelliste
+    L.imgX = M + (CW - L.iw) / 2;
+    L.barY = L.imgTop + L.ih + 40 * h;
+    L.titleY = L.barY + titleRel;
+  } else { // Bildoberkante wie im Beispiel bei 2/7 der Höhe, tiefer bei langem Titel
+    L.barY = 84;
+    L.imgTop = Math.max(400 / 1400 * F.UH, L.barY + titleRel + 23 * h);
+    L.imgX = M; L.iw = CW;
+    L.ih = L.blockTop - 24 * b - L.imgTop;
+    L.titleY = L.imgTop - 23 * h;
+  }
   return L;
 }
 
@@ -97,11 +138,12 @@ function plan(ctx, F, fit) {
 function draw(ctx, s, o = 0, preview = false) {
   const F = format(), v = id => $(id).value;
   let L;
+  const minIh = isAlbum() ? Math.min(.45 * F.UH, .8 * CW) : .45 * F.UH; // das Albumcover ist ohnehin auf 80 % Breite begrenzt
   for (let i = 0; i <= 5; i++) { // Schrift in 5-%-Schritten bis 75 % verkleinern, bis das Bild mind. 45 % der Höhe hat
     L = plan(ctx, F, 1 - i * .05);
-    if (L.ih >= .45 * F.UH) break;
+    if (L.ih >= minIh) break;
   }
-  state.crowded = L.ih < .45 * F.UH;
+  state.crowded = L.ih < minIh;
   const { b, h } = L;
 
   ctx.setTransform(s, 0, 0, s, o, o);
@@ -111,20 +153,20 @@ function draw(ctx, s, o = 0, preview = false) {
   ctx.fillRect(0, 0, U, F.UH);
   document.querySelectorAll('.swatches input').forEach((c, i) => {
     ctx.fillStyle = c.value;
-    ctx.fillRect(M + i * 34 * h, 84, 34.5 * h, 8.5 * h);
+    ctx.fillRect(M + i * 34 * h, L.barY, 34.5 * h, 8.5 * h);
   });
 
   ctx.fillStyle = FG;
   ctx.textAlign = 'right';
   for (const m of L.meta) {
     ctx.font = font(400, 11.3 * b);
-    m.lines.forEach((l, i) => ctx.fillText(l, R, m.y + i * 12.8 * b));
+    m.lines.forEach((l, i) => ctx.fillText(l, R, L.barY + m.y + i * 12.8 * b));
     ctx.font = font(700, 11.3 * b);
-    ctx.fillText(m.label + ' /', m.labelX, m.y);
+    ctx.fillText(m.label + ' /', m.labelX, L.barY + m.y);
   }
 
   ctx.textAlign = 'left';
-  let y = L.imgTop - 23 * h; // letzte Grundlinie sitzt auf dem Bild, weitere Zeilen wachsen nach oben
+  let y = L.titleY; // von der letzten Grundlinie aus wachsen weitere Zeilen nach oben
   for (const t of [...L.title].reverse()) {
     ctx.font = font(700, t.px);
     ctx.letterSpacing = -.028 * t.px + 'px';
@@ -132,7 +174,7 @@ function draw(ctx, s, o = 0, preview = false) {
     y -= t.adv;
   }
   ctx.letterSpacing = '0px';
-  const logo = state.logo;
+  const logo = L.ls && state.logo;
   if (logo) ctx.drawImage(logo, R - logo.width * L.ls, L.imgTop - 13 * h - logo.height * L.ls, logo.width * L.ls, logo.height * L.ls);
 
   const year = v('year'), day = v('day');
@@ -148,26 +190,41 @@ function draw(ctx, s, o = 0, preview = false) {
     ctx.lineWidth = 3 * b;
     ctx.beginPath(); ctx.moveTo(L.slashX, L.bottom); ctx.lineTo(L.slashX + 11.4 * b, L.bottom - 45.6 * b); ctx.stroke();
   }
-  ctx.font = font(400, 11 * b);
+  ctx.font = font(400, L.fs);
   ctx.textAlign = 'left';
-  L.desc.forEach((l, i) => ctx.fillText(l, M, L.blockTop + 7.9 * b + i * 12.5 * b));
+  const lineY = i => L.blockTop + L.cap + i * L.step;
+  L.desc?.forEach((l, i) => ctx.fillText(l, M, lineY(i)));
+  if (L.tracks) { // "01  Titel … 4:20" je Spalte, zu lange Titel mit Auslassungspunkten
+    const { list, rows, cw } = L.tracks;
+    list.forEach(([name, dur], i) => {
+      const x = M + Math.floor(i / rows) * (cw + 30 * b), y = lineY(i % rows);
+      ctx.font = font(700, L.fs);
+      ctx.textAlign = 'left';
+      ctx.fillText(String(i + 1).padStart(2, '0'), x, y);
+      ctx.font = font(400, L.fs);
+      ctx.textAlign = 'right';
+      ctx.fillText(dur, x + cw, y);
+      ctx.textAlign = 'left';
+      ctx.fillText(ellipsis(ctx, name, cw - 32 * b - (dur ? ctx.measureText(dur).width + 12 * b : 0)), x + 32 * b, y);
+    });
+  }
 
   // Bild im Rahmen. Zoom 1 = füllt den Rahmen, < 1 = kleiner als der Rahmen (Rest schwarz), > 1 = hineingezoomt.
-  // cropX/cropY (0…1) positionieren das Bild im Spielraum (CW - Bildbreite), egal ob es übersteht oder Luft hat
-  const imgTop = L.imgTop, ih = L.ih;
+  // cropX/cropY (0…1) positionieren das Bild im Spielraum (Rahmen- minus Bildbreite), egal ob es übersteht oder Luft hat
+  const { imgX, imgTop, iw, ih } = L;
   ctx.fillStyle = '#000';
-  ctx.fillRect(M, imgTop, CW, ih);
+  ctx.fillRect(imgX, imgTop, iw, ih);
   const img = state.image;
   state.view = null;
   if (img && ih > 0) {
-    const k = Math.max(CW / img.width, ih / img.height) * v('zoom'), dw = img.width * k, dh = img.height * k;
-    const slackX = CW - dw, slackY = ih - dh;
+    const k = Math.max(iw / img.width, ih / img.height) * v('zoom'), dw = img.width * k, dh = img.height * k;
+    const slackX = iw - dw, slackY = ih - dh;
     ctx.save();
-    ctx.beginPath(); ctx.rect(M, imgTop, CW, ih); ctx.clip();
-    ctx.drawImage(img, M + slackX * v('cropX'), imgTop + slackY * v('cropY'), dw, dh);
+    ctx.beginPath(); ctx.rect(imgX, imgTop, iw, ih); ctx.clip();
+    ctx.drawImage(img, imgX + slackX * v('cropX'), imgTop + slackY * v('cropY'), dw, dh);
     ctx.restore();
     state.dpi = img.width / (dw / U * F.w / 2.54); // Quellpixel pro Zoll im Druck
-    state.view = { top: imgTop, ih, slackX, slackY };
+    state.view = { left: imgX, top: imgTop, iw, ih, slackX, slackY };
   } else if (preview) {
     ctx.fillStyle = 'rgba(239, 233, 220, .5)';
     ctx.font = font(400, 16 * b);
@@ -241,7 +298,7 @@ function render() {
     const [w2, h2] = exportSize(), jpg = $('format').value === 'jpeg', cm = n => n.toLocaleString('de-DE');
     $('export').textContent = `Als ${jpg ? 'JPG' : 'PNG'} exportieren`;
     $('exportInfo').textContent = `${w2} × ${h2} px · ${F.dpi} dpi` + ($('bleed').checked ? ` (${cm(F.w + .6)} × ${cm(F.h + .6)} cm inkl. Beschnitt)` : '');
-    if (!SELFTEST) try { localStorage.setItem('poster', JSON.stringify(snapshot())); } catch {}
+    if (!SELFTEST) try { localStorage.setItem(STORE + 'poster', JSON.stringify(snapshot())); } catch {}
     if (!upscaling) {
       const need = state.image ? Math.min(4, F.dpi / state.dpi) : 0;
       $('upscale').disabled = need <= 1.05;
@@ -272,7 +329,7 @@ function idb(mode, op) {
     r.onsuccess = () => { const q = op(r.result.transaction('files', mode).objectStore('files')); q.onsuccess = () => ok(q.result); q.onerror = () => fail(q.error); };
   });
 }
-const storeFile = (key, file) => SELFTEST || idb('readwrite', st => file ? st.put(file, key) : st.delete(key)).catch(() => {});
+const storeFile = (key, file) => SELFTEST || idb('readwrite', st => file ? st.put(file, STORE + key) : st.delete(STORE + key)).catch(() => {});
 const HINT = { image: 'oder in die Vorschau ziehen', logo: 'optional, PNG mit Transparenz' };
 function clearImage(key) {
   state[key] = state.files[key] = null;
@@ -305,10 +362,12 @@ const toDataURL = f => new Promise((ok, fail) => { const r = new FileReader(); r
 $('saveProject').onclick = async () => {
   const files = {};
   for (const [k, f] of Object.entries(state.files)) if (f) files[k] = { name: f.name, data: await toDataURL(f) };
-  download(new Blob([JSON.stringify({ poster: 1, fields: snapshot(), files })], { type: 'application/json' }), fileName() + '.poster.json');
+  download(new Blob([JSON.stringify({ poster: 1, mode: MODE, fields: snapshot(), files })], { type: 'application/json' }), fileName() + '.poster.json');
 };
 async function openProject(p) {
-  if (p?.poster !== 1 || typeof p.fields !== 'object') throw new Error('kein Poster-Projekt');
+  if (p?.poster !== 1 || typeof p.fields !== 'object') throw new Error('Die Datei ist kein gültiges Poster-Projekt.');
+  const mode = p.mode === 'album' ? 'album' : 'game'; // ältere Projekte ohne mode sind Spiele
+  if (mode !== MODE) throw new Error(`Das ist ein ${mode === 'album' ? 'Album' : 'Spiel'}-Projekt. Bitte auf der Seite „${mode === 'album' ? 'Album' : 'Spiel'}“ öffnen.`);
   newPoster();
   restore(p.fields);
   for (const k of ['image', 'logo']) {
@@ -322,13 +381,14 @@ async function openProject(p) {
 $('openProject').onchange = async e => {
   const f = e.target.files[0];
   e.target.value = '';
-  try { await openProject(JSON.parse(await f.text())); }
-  catch { alert('Die Datei ist kein gültiges Poster-Projekt.'); }
+  let p;
+  try { p = JSON.parse(await f.text()); } catch {}
+  try { await openProject(p); } catch (err) { alert(err.message); }
 };
 
 // Ausschnitt: in der Vorschau ziehen, Mausrad zoomt, Pfeiltasten verschieben
 const toUnits = e => { const r = preview.getBoundingClientRect(); return [(e.clientX - r.left) * U / r.width, (e.clientY - r.top) * U / r.width]; };
-const onImage = e => { const [x, y] = toUnits(e), vw = state.view; return !!vw && x >= M && x <= R && y >= vw.top && y <= vw.top + vw.ih; };
+const onImage = e => { const [x, y] = toUnits(e), vw = state.view; return !!vw && x >= vw.left && x <= vw.left + vw.iw && y >= vw.top && y <= vw.top + vw.ih; };
 function panBy(dx, dy) { // in Poster-Einheiten; Bild folgt der Bewegung
   const vw = state.view, clamp = n => Math.min(1, Math.max(0, n));
   if (!vw) return;
@@ -400,12 +460,13 @@ function gameFields(g) {
     genres: (g.genres || []).join('\n'),
     desc: para.length > 500 ? para.slice(0, para.lastIndexOf('. ', 499) + 1) || para.slice(0, 500) : para, // am Satzende kürzen
     year: d ? String(d.getUTCFullYear()) : '',
-    day: d ? d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }) : '',
+    day: d ? shortDay(d) : '',
     website: g.website || '', // offizielle Seite, dort liegt meist das Presskit
   };
 }
+const shortDay = d => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
 const gameStatus = t => $('gameStatus').textContent = t ?? '';
-const errText = e => e instanceof TypeError ? 'Keine Verbindung zur Spieldatenbank. Internet prüfen.' : e.message;
+const errText = e => e instanceof TypeError ? 'Keine Verbindung zur Datenbank. Internet prüfen.' : e.message;
 async function wm(host, params) { // MediaWiki-API (Wikidata, Commons), origin=* erlaubt den Zugriff aus dem Browser
   const r = await fetch(`https://${host}/w/api.php?` + new URLSearchParams({ format: 'json', origin: '*', ...params }));
   if (!r.ok) throw new Error(`${host}: Fehler ${r.status}.`);
@@ -421,7 +482,7 @@ async function wikidataSearch(q) {
   const ids = (await wd({ action: 'query', list: 'search', srsearch: q + ' haswbstatement:P31=Q7889', srlimit: 10 })).query.search.map(r => r.title);
   if (!ids.length) return [];
   const { entities } = await wd({ action: 'wbgetentities', ids: ids.join('|'), props: 'labels|claims|sitelinks', languages: 'en|mul|de' });
-  return ids.map(id => entities[id]).filter(wdLabel).map(e => ({ name: wdLabel(e), year: wdDate(e)?.time.slice(1, 5), load: () => wikidataGame(e) }));
+  return ids.map(id => entities[id]).filter(wdLabel).map(e => ({ name: wdLabel(e), info: wdDate(e)?.time.slice(1, 5), load: () => wikidataGame(e) }));
 }
 async function wikidataGame(e) {
   const dev = claims(e, 'P178')[0]?.id, genres = claims(e, 'P136').map(v => v.id).slice(0, 6), logoFile = claims(e, 'P154')[0];
@@ -446,23 +507,103 @@ async function wikidataGame(e) {
   if (!fields.year && date) fields.year = date.time.slice(1, 5);
   return {
     fields,
-    image: summary.originalimage?.source, // Cover aus dem Wikipedia-Artikel, meist nur ~300 px: Platzhalter
+    // Cover aus dem Wikipedia-Artikel, meist nur ~300 px: Platzhalter
+    covers: summary.originalimage ? [['Wikipedia-Cover.jpg', summary.originalimage.source]] : [],
     logos: [steam && ['Steam-Logo.png', `https://shared.steamstatic.com/store_item_assets/steam/apps/${steam}/logo.png`],
       logo && ['Wikidata-Logo.png', logo]].filter(Boolean), // Steam zuerst: verlässlicher und meist hell für dunkle Poster
   };
 }
+
+// Albumdaten: MusicBrainz (Titel, Künstler, Label, Genres, Titelliste) + Cover Art Archive. Frei, ohne Key.
+// Spotify geht nicht: dessen API verlangt immer einen Key (OAuth), auch für öffentliche Daten
+let mbNext = 0;
+async function mb(path, params, retry = true) { // MusicBrainz erlaubt 1 Anfrage pro Sekunde, sonst Fehler 503: Anfragen hintereinander einreihen
+  const wait = mbNext - Date.now();
+  mbNext = Math.max(mbNext, Date.now()) + 1000;
+  if (wait > 0) await new Promise(r => setTimeout(r, wait));
+  const r = await fetch(`https://musicbrainz.org/ws/2/${path}?` + new URLSearchParams({ fmt: 'json', ...params }));
+  if (r.status === 503 && retry) return mb(path, params, false); // kommt trotz Takt gelegentlich vor
+  if (!r.ok) throw new Error(`MusicBrainz: Fehler ${r.status}.`);
+  return r.json();
+}
+const credit = ac => (ac || []).map(a => a.name + (a.joinphrase || '')).join('');
+const fold = s => s.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '').split(/[^\p{L}\p{N}]+/u).filter(Boolean); // "Die Ärzte" → [die, arzte]
+const albumHit = g => ({ name: g.title, load: () => albumLoad(g),
+  info: [credit(g['artist-credit']), g['first-release-date']?.slice(0, 4), ...(g['secondary-types'] || [])].filter(Boolean).join(' · ') });
+async function albumSearch(q) {
+  // jedes Wort muss im Albumtitel oder beim Künstler vorkommen ("abbey road beatles"), der ganze Text als Albumtitel zählt extra;
+  // klein geschrieben, damit AND/OR keine Operatoren werden. Das letzte Wort zählt als Wortanfang, damit schon beim Tippen
+  // etwas kommt ("rammst"); nicht bei Sonderzeichen ("ac/dc"), daran scheitert der Platzhalter
+  const esc = s => s.replace(/[+\-&|!(){}[\]^"~*?:\\/]/g, '\\$&'), words = q.toLowerCase().split(/\s+/).filter(Boolean);
+  const terms = words.map((w, i) => esc(w) + (i === words.length - 1 && /^[\p{L}\p{N}]+$/u.test(w) ? '*' : ''));
+  const query = `+(${terms.map(t => `(releasegroup:${t} OR artist:${t})`).join(' AND ')}) releasegroup:"${esc(words.join(' '))}"^8 +(primarytype:album OR primarytype:ep)`;
+  const groups = (await mb('release-group', { query, limit: 100 }))['release-groups'] || [];
+  // MusicBrainz kennt keine Beliebtheit; viele Veröffentlichungen (count) heißt bekanntes Album: "thriller" → Michael Jackson statt der Band Thriller.
+  // Compilations, Live, Karaoke usw. hinter die Studioalben
+  const rank = g => (g.score || 0) + 20 * Math.log10(1 + (g.count || 0)) - (g['secondary-types']?.length ? 15 : 0);
+  // Künstler, auf deren Namen alle Wörter passen, bekommen eine eigene Zeile oben; Klick zeigt alle ihre Alben.
+  // ponytail: nur Künstler unter den 100 Kandidaten mit mind. 3 Veröffentlichungen darin, sonst taucht jeder Namensvetter auf
+  const artists = new Map(), qw = fold(q);
+  for (const g of groups) for (const { artist } of g['artist-credit'] || []) {
+    const names = fold(artist?.name || '');
+    if (!artist?.id || !qw.every(w => names.some(n => n.startsWith(w)))) continue;
+    const a = artists.get(artist.id) || { name: artist.name, n: 0 };
+    a.n += g.count || 1;
+    artists.set(artist.id, a);
+  }
+  const top = [...artists].filter(([, a]) => a.n >= 3).sort((x, y) => y[1].n - x[1].n).slice(0, 2)
+    .map(([id, a]) => ({ name: a.name, info: 'Künstler · alle Alben zeigen', albums: () => artistAlbums(id) }));
+  return [...top, ...groups.sort((a, b) => rank(b) - rank(a)).slice(0, 10).map(albumHit)];
+}
+async function artistAlbums(id) { // Diskografie: Studioalben zuerst, jeweils chronologisch
+  const groups = (await mb('release-group', { artist: id, type: 'album|ep', inc: 'artist-credits', limit: 100 }))['release-groups'] || [];
+  const key = g => (g['secondary-types']?.length ? '1' : '0') + (g['first-release-date'] || '9');
+  return groups.sort((a, b) => key(a).localeCompare(key(b))).map(albumHit);
+}
+async function albumLoad(g) {
+  const [{ releases = [] }, { genres = [] }] = await Promise.all([
+    mb('release', { 'release-group': g.id, status: 'official', inc: 'recordings labels', limit: 100 }),
+    mb('release-group/' + g.id, { inc: 'genres' }),
+  ]);
+  // ponytail: Erstveröffentlichung (genau am Datum der Albumgruppe, sonst die früheste) = meist die Originalfassung ohne Bonustitel;
+  // nur die erste Seite (bis 100) wird angesehen, sonst Titelliste von Hand kürzen
+  const key = r => r.date === g['first-release-date'] ? '0' : r.date || '9';
+  const rel = releases.filter(r => r.media?.some(m => m.tracks?.length)).sort((a, b) => key(a).localeCompare(key(b)))[0];
+  return {
+    fields: albumFields({
+      title: g.title, artist: credit(g['artist-credit']), date: g['first-release-date'],
+      label: rel?.['label-info']?.map(l => l.label?.name).find(n => n && n !== '[no label]'),
+      genres: genres.sort((a, b) => b.count - a.count).slice(0, 3).map(x => x.name),
+      tracks: (rel?.media || []).flatMap(m => m.tracks || []).map(t => ({ title: t.title, ms: t.length ?? t.recording?.length })),
+    }),
+    covers: [['Album-Cover.jpg', `https://coverartarchive.org/release-group/${g.id}/front`]], // Original in voller Auflösung
+  };
+}
+function albumFields(a) {
+  const d = /^\d{4}-\d\d-\d\d$/.test(a.date || '') && new Date(a.date);
+  return {
+    title: a.title,
+    subtitle: a.artist || '',
+    company: a.label || '',
+    genres: [...new Set(a.genres.map(genreName))].join('\n'),
+    tracks: a.tracks.map(t => t.title + (t.ms ? ' ' + clock(Math.round(t.ms / 1000)) : '')).join('\n'),
+    year: a.date?.slice(0, 4) || '',
+    day: d ? shortDay(d) : '',
+  };
+}
+
 async function applyGame(load) {
   gameStatus('Wird geladen…');
   try {
-    const { fields, image, logos } = await load();
+    const { fields, covers, logos } = await load();
     Object.entries(fields).forEach(([k, v]) => $(k).value = v);
-    await Promise.all([autoImage('image', image ? [['Wikipedia-Cover.jpg', image]] : []), autoImage('logo', logos)]);
+    await Promise.all([autoImage('image', covers), logos && autoImage('logo', logos)]);
     gameStatus();
     render();
   } catch (err) { gameStatus(errText(err)); }
 }
-// Automatisch geladene Bilder ersetzen sich beim nächsten Spiel, eigene Uploads bleiben. sources: [[Name, URL], …], erste ladbare gewinnt
-const AUTO = new Set(['Wikipedia-Cover.jpg', 'Steam-Logo.png', 'Wikidata-Logo.png']);
+// Automatisch geladene Bilder ersetzen sich beim nächsten Treffer, eigene Uploads bleiben. sources: [[Name, URL], …], erste ladbare gewinnt
+const AUTO = new Set(['Wikipedia-Cover.jpg', 'Steam-Logo.png', 'Wikidata-Logo.png', 'Album-Cover.jpg']);
 async function autoImage(key, sources) {
   if (state[key] && !AUTO.has($(key + 'Name').textContent)) return;
   clearImage(key);
@@ -483,7 +624,7 @@ const SEARCH = {
     return 'https://www.google.com/search?' + new URLSearchParams({ q: host ? `site:${host} (press OR presskit OR media)` : `"${q}" press kit key art` });
   },
   alphacoders: q => 'https://wall.alphacoders.com/search.php?' + new URLSearchParams({ search: q }),
-  google: q => 'https://www.google.com/search?' + new URLSearchParams({ q: q + ' key art', tbm: 'isch', tbs: 'isz:l' }),
+  google: q => 'https://www.google.com/search?' + new URLSearchParams({ q: q + (isAlbum() ? ' album cover' : ' key art'), tbm: 'isch', tbs: 'isz:l' }),
   wallhaven: q => 'https://wallhaven.cc/search?' + new URLSearchParams({ q, categories: '111', purity: '100', atleast: '2400x2400', sorting: 'relevance' }),
 };
 document.querySelectorAll('[data-search]').forEach(a => a.onclick = () => {
@@ -496,17 +637,34 @@ let searchTimer, searchSeq = 0;
 async function searchGames(q) {
   const seq = ++searchSeq;
   let hits;
-  try { hits = await wikidataSearch(q); }
+  try { hits = await (isAlbum() ? albumSearch : wikidataSearch)(q); }
   catch (err) { if (seq === searchSeq) gameStatus(errText(err)); return; }
   if (seq !== searchSeq) return; // Antwort auf eine ältere Eingabe
+  showHits(hits);
+  gameStatus(hits.length ? undefined : isAlbum() ? 'Kein Album gefunden. Albumtitel oder Künstler versuchen.' : 'Kein Spiel gefunden. Englischen Originaltitel versuchen.');
+}
+// Treffer: Spiel/Album lädt die Daten, Künstler (h.albums) ersetzt die Liste durch seine Alben
+function showHits(hits) {
   $('games').replaceChildren(...hits.map(h => {
     const b = Object.assign(document.createElement('button'), { type: 'button', className: 'result' });
-    b.append(h.name, Object.assign(document.createElement('span'), { textContent: h.year || '' }));
-    b.onclick = () => { $('game').value = h.name; $('games').replaceChildren(); applyGame(h.load); };
+    b.append(h.name, Object.assign(document.createElement('span'), { textContent: h.info || '' }));
+    b.onclick = async () => {
+      if (!h.albums) { $('game').value = h.name; $('games').replaceChildren(); return applyGame(h.load); }
+      const seq = ++searchSeq;
+      gameStatus('Alben werden geladen…');
+      try {
+        const albums = await h.albums();
+        if (seq !== searchSeq) return;
+        showHits(albums);
+        gameStatus(albums.length ? undefined : 'Keine Alben gefunden.');
+        $('games').firstElementChild?.focus();
+      } catch (err) { if (seq === searchSeq) gameStatus(errText(err)); }
+    };
     return b;
   }));
-  gameStatus(hits.length ? undefined : 'Kein Spiel gefunden. Englischen Originaltitel versuchen.');
 }
+if (MODE === 'album') Object.entries({ game: 'z. B. Abbey Road Beatles', title: 'z. B. Abbey Road', subtitle: 'z. B. The Beatles', company: 'z. B. Apple',
+  genres: 'Rock\nPop' }).forEach(([id, p]) => $(id).placeholder = p);
 $('game').oninput = e => {
   const q = e.target.value.trim();
   clearTimeout(searchTimer);
@@ -618,11 +776,11 @@ $('export').onclick = async ({ currentTarget: b }) => {
 };
 
 // Start: Schrift laden, letzte Sitzung wiederherstellen, dann zeichnen
-fontsReady.finally(async () => {
+if (MODE !== 'start') fontsReady.finally(async () => { // Startseite zeichnet nichts und darf nichts überschreiben
   if (!SELFTEST) {
-    try { restore(JSON.parse(localStorage.getItem('poster'))); } catch {}
+    try { restore(JSON.parse(localStorage.getItem(STORE + 'poster'))); } catch {}
     for (const k of ['image', 'logo']) {
-      const f = await idb('readonly', st => st.get(k)).catch(() => null);
+      const f = await idb('readonly', st => st.get(STORE + k)).catch(() => null);
       if (f) await loadImage(f, k, false);
     }
   }
@@ -674,7 +832,7 @@ if (location.hash === '#selftest') (async () => {
       ok(w.fields.title === 'Need for Speed:' && w.fields.subtitle === 'Most Wanted' && w.fields.company === 'Criterion Games'
         && w.fields.genres === 'Racing\nOpen World' && w.fields.year === '2012' && w.fields.day === 'Oct 30'
         && w.fields.desc === 'Need for Speed: Most Wanted is a 2012 racing game.' && w.fields.website === 'https://www.ea.com/nfs', 'Wikidata-Felder');
-      ok(w.image === 'https://upload.wikimedia.org/cover.jpg' && w.logos.map(l => l[0]).join() === 'Steam-Logo.png,Wikidata-Logo.png'
+      ok(w.covers[0][1] === 'https://upload.wikimedia.org/cover.jpg' && w.logos.map(l => l[0]).join() === 'Steam-Logo.png,Wikidata-Logo.png'
         && w.logos[0][1].includes('/1262560/') && w.logos[1][1] === 'https://upload.wikimedia.org/logo.png', 'Cover und Logo-Quellen');
       await applyGame(() => wikidataGame(fake.Q1));
       ok($('imageName').textContent === 'Wikipedia-Cover.jpg' && $('logoName').textContent === 'Wikidata-Logo.png' && state.logo, 'Logo-Rückfall auf Wikidata');
@@ -701,7 +859,7 @@ if (location.hash === '#selftest') (async () => {
 
     // Layout: 50 × 70 exakt wie gemessen (Faktor 1, Bild ab 400); langer Titel schiebt das Bild nach unten statt in die Genres
     let L = plan(ctx, format(), 1);
-    ok(L.b === 1 && L.h === 1 && Math.abs(L.imgTop - 400) < 1e-9 && L.meta[0].y === 92 && L.bottom === 1300, '50 × 70 unverändert');
+    ok(L.b === 1 && L.h === 1 && Math.abs(L.imgTop - 400) < 1e-9 && L.barY + L.meta[0].y === 92 && L.bottom === 1300, '50 × 70 unverändert');
     const t = $('title').value;
     $('title').value = 'Wwwwwwwwwwww Wwwwwwwwwwwww Wwwwwwwwwwww';
     ok(plan(ctx, format(), 1).imgTop > 450, 'langer Titel schiebt Bild nach unten');
@@ -755,6 +913,54 @@ if (location.hash === '#selftest') (async () => {
     const c = renderFull();
     ok(c.width === EW + 70 && c.height === EH + 70 && c.getContext('2d').getImageData(0, 0, 1, 1).data[0] === 0x2b, 'Beschnitt');
     $('bleed').checked = false;
+
+    // Album: Titelliste, Laufzeit, MusicBrainz (simuliert), quadratisches, zentriertes Cover in jedem Format
+    ok(clock(59) === '0:59' && clock(3725) === '1:02:05' && runtime('A 4:20\nB 1:00:05\nC') === '1:04:25' && runtime('A\nB') === '', 'Laufzeit');
+    ok(JSON.stringify(trackList('Come Together 4:20\n\n  Her Majesty  ')) === '[["Come Together","4:20"],["Her Majesty",""]]', 'Titelliste');
+    const mbFake = { 'release-groups': [{ id: 'rg1', title: 'Abbey Road', 'first-release-date': '1969-09-26', 'artist-credit': [{ name: 'The Beatles' }] }],
+      releases: [{ date: '2019-09-27', 'label-info': [{ label: { name: 'Apple' } }], media: [{ tracks: [{ title: 'Bonus', length: 1000 }] }] },
+        { date: '1969', 'label-info': [{ label: { name: 'Odeon' } }], media: [{ tracks: [{ title: 'Andere Pressung' }] }] },
+        { date: '1969-09-26', 'label-info': [{ label: { name: '[no label]' } }, { label: { name: 'Apple Records' } }],
+          media: [{ tracks: [{ title: 'Come Together', length: 259946 }] }, { tracks: [{ title: 'Her Majesty', recording: { length: 23000 } }] }] }],
+      genres: [{ name: 'pop', count: 1 }, { name: 'rock', count: 5 }] };
+    const mbUrls = [];
+    window.fetch = async url => { mbUrls.push(new URL(url)); return new Response(JSON.stringify(mbFake)); };
+    document.body.dataset.mode = 'album';
+    try {
+      await searchGames('Abbey AC/DC');
+      ok($('games').textContent === 'Abbey RoadThe Beatles · 1969', 'MusicBrainz-Suche');
+      ok(mbUrls[0].searchParams.get('query') === '+((releasegroup:abbey OR artist:abbey) AND (releasegroup:ac\\/dc OR artist:ac\\/dc)) releasegroup:"abbey ac\\/dc"^8 +(primarytype:album OR primarytype:ep)', 'MusicBrainz-Abfrage');
+      mbFake['release-groups'].push({ id: 'rg2', title: 'Thriller', score: 100, count: 1 }, { id: 'rg3', title: 'Thriller', score: 87, count: 87, 'artist-credit': [{ name: 'Michael Jackson' }] },
+        { id: 'rg4', title: 'Thriller Live', score: 100, count: 87, 'secondary-types': ['Live'] });
+      ok((await albumSearch('thriller')).map(h => h.info).join('|') === 'Michael Jackson|Live||The Beatles · 1969', 'bekannte Alben zuerst, Live danach');
+      ok(mbUrls.at(-1).searchParams.get('query').includes('(releasegroup:thriller* OR artist:thriller*)'), 'letztes Wort als Wortanfang');
+      // Künstlerzeile: "beatl" passt auf "The Beatles" (genug Veröffentlichungen), Klick zeigt die Diskografie, Studioalben zuerst
+      mbFake['release-groups'] = [{ ...mbFake['release-groups'][0], count: 73, 'artist-credit': [{ name: 'The Beatles', artist: { id: 'a1', name: 'The Beatles' } }] },
+        { id: 'rg5', title: '1', 'first-release-date': '2000', 'secondary-types': ['Compilation'] }, { id: 'rg6', title: 'Please Please Me', 'first-release-date': '1963' }];
+      const beatles = await albumSearch('beatl');
+      ok(beatles[0].name === 'The Beatles' && beatles[0].albums && beatles[1].name === 'Abbey Road', 'Künstler in der Suche');
+      showHits(beatles);
+      $('games').firstElementChild.click();
+      for (let i = 0; i < 40 && $('games').children.length !== 3; i++) await new Promise(r => setTimeout(r, 100));
+      ok([...$('games').children].map(b => b.firstChild.textContent).join('|') === 'Please Please Me|Abbey Road|1'
+        && mbUrls.at(-1).searchParams.get('artist') === 'a1' && mbUrls.at(-1).searchParams.get('type') === 'album|ep', 'Diskografie des Künstlers');
+      mbFake['release-groups'].length = 1;
+      const a = await albumLoad(mbFake['release-groups'][0]);
+      ok(a.fields.title === 'Abbey Road' && a.fields.subtitle === 'The Beatles' && a.fields.company === 'Apple Records' && a.fields.genres === 'Rock\nPop'
+        && a.fields.tracks === 'Come Together 4:20\nHer Majesty 0:23' && a.fields.year === '1969' && a.fields.day === 'Sep 26'
+        && a.covers[0][1] === 'https://coverartarchive.org/release-group/rg1/front', 'Albumfelder');
+      Object.entries(a.fields).forEach(([k, v]) => $(k).value = v);
+      $('tracks').value = Array.from({ length: 17 }, (_, i) => `Track number ${i + 1} with a rather long title 3:0${i % 10}`).join('\n');
+      for (const size of Object.keys(FORMATS)) {
+        $('size').value = size;
+        draw(ctx, preview.width / U);
+        const vw = state.view;
+        ok(!state.crowded && vw.iw === vw.ih && Math.abs(vw.left + vw.iw / 2 - U / 2) < 1e-9, 'Album passt in ' + size);
+      }
+      $('size').value = '50x70';
+      ok(plan(ctx, format(), 1).ih === .8 * CW, 'Album 50 × 70: Cover in voller Größe');
+    } finally { window.fetch = realFetch; document.body.dataset.mode = 'game'; }
+    $('games').replaceChildren();
     document.title = 'SELFTEST OK';
   } catch (e) { document.title = 'SELFTEST FAIL: ' + e.message; }
   $('dpi').textContent = document.title;

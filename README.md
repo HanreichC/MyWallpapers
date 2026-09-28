@@ -1,8 +1,9 @@
 # MyWallpapers
 
-Poster-Generator (50 × 70 cm, 300 dpi). Läuft komplett offline: `index.html` per Doppelklick öffnen, kein Server, keine Installation.
+Poster-Generator (50 × 70 cm, 300 dpi). Läuft komplett offline: `index.html` per Doppelklick öffnen, kein Server, keine Installation. Die Startseite bietet zwei Posterarten als Kacheln (direkt erreichbar über `index.html#spiel` bzw. `#album`), jede merkt sich ihren eigenen Stand.
 
-- Spielesuche über Wikidata/Wikipedia, ohne Key (braucht Internet): füllt Titel, Entwickler, Genres, Datum und Beschreibung, lädt das Wikipedia-Cover als Platzhalter und das Logo von Steam bzw. Wikidata.
+- **Spiel**: Suche über Wikidata/Wikipedia, ohne Key (braucht Internet): füllt Titel, Entwickler, Genres, Datum und Beschreibung, lädt das Wikipedia-Cover als Platzhalter und das Logo von Steam bzw. Wikidata.
+- **Album**: Suche über MusicBrainz, ohne Key (Spotify geht nicht, dessen API verlangt immer einen Key): füllt Album, Künstler, Label, Genres, Datum und die Titelliste mit Laufzeiten, lädt das Cover in Originalgröße aus dem Cover Art Archive. Die Titel stehen unter dem Cover in bis zu drei Spalten.
 - Bildausschnitt: in der Vorschau ziehen, zoomen mit Mausrad oder Regler.
 - **Mit KI hochskalieren**: ESRGAN läuft lokal im Browser (WebGL) und rechnet zu kleine Bilder auf bis zu 300 dpi hoch (max. 4×).
 - Eingaben und Bilder bleiben im Browser gespeichert. **Sichern…** legt ein Projekt als `.poster.json` ab, **Öffnen…** lädt es wieder.

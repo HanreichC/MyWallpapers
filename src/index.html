@@ -7,10 +7,46 @@
 <!-- build:css -->
 </head>
 <body>
+<!-- Seiten per Hash statt eigener Dateien: Sandbox-Browser sehen beim Doppelklick nur diese eine Datei -->
+<script>document.body.dataset.mode = { '#spiel': 'game', '#album': 'album', '#selftest': 'game' }[location.hash] || 'start'; onhashchange = () => location.reload();</script>
 <canvas id="ambient" aria-hidden="true"></canvas>
+<section class="start" data-only="start">
+  <h1>Poster</h1>
+  <p class="secondary">Was möchtest du gestalten?</p>
+  <nav class="tiles" aria-label="Posterart">
+    <a class="tile" href="#spiel">
+      <svg viewBox="0 0 50 70" aria-hidden="true">
+        <defs><linearGradient id="gGame" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#3a6186"/><stop offset=".6" stop-color="#89253e"/><stop offset="1" stop-color="#1b1b2f"/></linearGradient></defs>
+        <rect width="50" height="70" fill="#2b2b2b"/>
+        <g fill="#efe9dc"><rect x="5" y="4.2" width="1.7" height=".45" fill="#3a6186"/><rect x="6.7" y="4.2" width="1.7" height=".45" fill="#89253e"/><rect x="8.4" y="4.2" width="1.7" height=".45" fill="#c06c84"/><rect x="10.1" y="4.2" width="1.7" height=".45" fill="#f67280"/><rect x="11.8" y="4.2" width="1.7" height=".45" fill="#f8b195"/>
+          <rect x="37" y="4.2" width="8" height=".6"/><rect x="39" y="5.6" width="6" height=".6"/><rect x="40" y="6.6" width="5" height=".6"/>
+          <rect x="5" y="12.5" width="26" height="3.6"/><rect x="5" y="17" width="18" height="2"/>
+          <rect x="5" y="59.5" width="27" height=".6"/><rect x="5" y="60.8" width="27" height=".6"/><rect x="5" y="62.1" width="20" height=".6"/><rect x="38" y="60" width="7" height="2.4"/></g>
+        <rect x="5" y="20.5" width="40" height="36.5" fill="url(#gGame)"/>
+      </svg>
+      <strong>Spiel</strong>
+      <span>Key Art, Entwickler, Genres und Beschreibung. Daten von Wikidata.</span>
+    </a>
+    <a class="tile" href="#album">
+      <svg viewBox="0 0 50 70" aria-hidden="true">
+        <defs><linearGradient id="gAlbum" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f8b195"/><stop offset=".5" stop-color="#c06c84"/><stop offset="1" stop-color="#355c7d"/></linearGradient></defs>
+        <rect width="50" height="70" fill="#2b2b2b"/>
+        <rect x="5" y="5" width="40" height="40" fill="url(#gAlbum)"/>
+        <g fill="#efe9dc"><rect x="5" y="47" width="1.7" height=".45" fill="#355c7d"/><rect x="6.7" y="47" width="1.7" height=".45" fill="#6c5b7b"/><rect x="8.4" y="47" width="1.7" height=".45" fill="#c06c84"/><rect x="10.1" y="47" width="1.7" height=".45" fill="#f67280"/><rect x="11.8" y="47" width="1.7" height=".45" fill="#f8b195"/>
+          <rect x="37" y="47" width="8" height=".6"/><rect x="40" y="48.4" width="5" height=".6"/>
+          <rect x="5" y="49.5" width="22" height="3.4"/><rect x="5" y="53.8" width="14" height="1.8"/>
+          <rect x="5" y="59.5" width="12" height=".6"/><rect x="5" y="60.9" width="11" height=".6"/><rect x="5" y="62.3" width="12" height=".6"/><rect x="5" y="63.7" width="9" height=".6"/>
+          <rect x="19" y="59.5" width="11" height=".6"/><rect x="19" y="60.9" width="12" height=".6"/><rect x="19" y="62.3" width="10" height=".6"/><rect x="38" y="60" width="7" height="2.4"/></g>
+      </svg>
+      <strong>Album</strong>
+      <span>Cover, Künstler, Label und Titelliste. Daten von MusicBrainz.</span>
+    </a>
+  </nav>
+</section>
 <aside>
   <header>
-    <div><h1>Poster</h1>
+    <a class="back" href="#">Übersicht</a>
+    <div><h1><span data-only="game">Spiel-Poster</span><span data-only="album">Album-Poster</span></h1>
       <select id="size" aria-label="Format">
         <optgroup label="DIN"><option value="a5">A5 · 14,8 × 21 cm</option><option value="a4">A4 · 21 × 29,7 cm</option><option value="a3">A3 · 29,7 × 42 cm</option><option value="a2">A2 · 42 × 59,4 cm</option><option value="a1">A1 · 59,4 × 84,1 cm</option></optgroup>
         <optgroup label="Poster"><option value="30x40">30 × 40 cm</option><option value="40x50">40 × 50 cm</option><option value="50x70" selected>50 × 70 cm</option><option value="60x90">60 × 90 cm</option><option value="70x100">70 × 100 cm</option></optgroup>
@@ -22,7 +58,7 @@
     <button type="button" id="saveProject" class="button">Sichern…</button>
   </div>
   <form id="form" autocomplete="off">
-    <h2>Spiel</h2>
+    <h2 data-only="game">Spiel</h2><h2 data-only="album">Album</h2>
     <div class="group">
       <div class="row"><label for="game">Suchen</label><input id="game" type="search" placeholder="z. B. Hollow Knight" aria-describedby="gameStatus" aria-controls="games"></div>
       <div class="results" id="games" role="group" aria-label="Suchergebnisse"></div>
@@ -33,10 +69,10 @@
     <div class="group">
       <label class="file"><input type="file" id="image" accept="image/*" class="visually-hidden"><span class="button">Bild auswählen…</span><span id="imageName">oder in die Vorschau ziehen</span></label>
       <div class="row stack"><span id="searchLabel">Suchen in</span><div class="links" role="group" aria-labelledby="searchLabel">
-        <a class="button" data-search="presskit" href="#" target="_blank" rel="noopener" title="Offizielles Artwork der Studios, meist höchste Qualität">Presskit ↗</a>
-        <a class="button" data-search="alphacoders" href="#" target="_blank" rel="noopener" title="Viele Spiele-Wallpaper, auf der Seite nach 4K+ filtern">Alpha Coders ↗</a>
+        <a class="button" data-search="presskit" data-only="game" href="#" target="_blank" rel="noopener" title="Offizielles Artwork der Studios, meist höchste Qualität">Presskit ↗</a>
+        <a class="button" data-search="alphacoders" data-only="game" href="#" target="_blank" rel="noopener" title="Viele Spiele-Wallpaper, auf der Seite nach 4K+ filtern">Alpha Coders ↗</a>
         <a class="button" data-search="google" href="#" target="_blank" rel="noopener" title="Google Bilder, nur große Bilder">Google ↗</a>
-        <a class="button" data-search="wallhaven" href="#" target="_blank" rel="noopener" title="Fan-Art und Wallpaper ab 2400 px">Wallhaven ↗</a>
+        <a class="button" data-search="wallhaven" data-only="game" href="#" target="_blank" rel="noopener" title="Fan-Art und Wallpaper ab 2400 px">Wallhaven ↗</a>
       </div></div>
       <div class="upscale"><button type="button" id="upscale" class="button" disabled>Mit KI hochskalieren</button><span id="upscaleInfo" aria-live="polite"></span>
         <progress id="upscaleProgress" hidden aria-label="Fortschritt Hochskalieren"></progress></div>
@@ -48,25 +84,31 @@
 
     <h2>Titel</h2>
     <div class="group">
-      <div class="row"><label for="title">Titel</label><input id="title" placeholder="z. B. Star Wars:"></div>
-      <div class="row"><label for="subtitle">Untertitel</label><textarea id="subtitle" rows="2" placeholder="optional, mehrzeilig möglich"></textarea></div>
+      <div class="row"><label for="title"><span data-only="game">Titel</span><span data-only="album">Album</span></label><input id="title" placeholder="z. B. Star Wars:"></div>
+      <div class="row"><label for="subtitle"><span data-only="game">Untertitel</span><span data-only="album">Künstler</span></label><textarea id="subtitle" rows="2" placeholder="optional, mehrzeilig möglich"></textarea></div>
     </div>
     <p class="footnote warn" id="titleWarn" aria-live="polite"></p>
 
     <h2>Details</h2>
     <div class="group">
-      <div class="row"><label for="company">Company</label><input id="company" placeholder="z. B. Team Cherry"></div>
+      <div class="row"><label for="company"><span data-only="game">Company</span><span data-only="album">Label</span></label><input id="company" placeholder="z. B. Team Cherry"></div>
       <div class="row"><label for="genres">Genres</label><textarea id="genres" rows="4" aria-describedby="genresHint" placeholder="Action&#10;Adventure"></textarea></div>
-      <label class="file"><input type="file" id="logo" accept="image/*" class="visually-hidden"><span class="button">Logo auswählen…</span><span id="logoName">optional, PNG mit Transparenz</span></label>
+      <div class="row"><label for="year">Jahr</label><input id="year" placeholder="2017" inputmode="numeric"></div>
+      <div class="row"><label for="day">Datum</label><input id="day" placeholder="Feb 24"></div>
+      <label class="file" data-only="game"><input type="file" id="logo" accept="image/*" class="visually-hidden"><span class="button">Logo auswählen…</span><span id="logoName">optional, PNG mit Transparenz</span></label>
     </div>
     <p class="footnote" id="genresHint">Ein Genre pro Zeile.</p>
 
-    <h2>Beschreibung</h2>
-    <div class="group">
+    <h2 data-only="game">Beschreibung</h2>
+    <div class="group" data-only="game">
       <div class="row"><label for="desc">Text</label><textarea id="desc" rows="5" placeholder="Kurzbeschreibung, etwa 2–4 Zeilen auf dem Poster"></textarea></div>
-      <div class="row"><label for="year">Jahr</label><input id="year" placeholder="2017" inputmode="numeric"></div>
-      <div class="row"><label for="day">Datum</label><input id="day" placeholder="Feb 24"></div>
     </div>
+
+    <h2 data-only="album">Titelliste</h2>
+    <div class="group" data-only="album">
+      <div class="row"><label for="tracks">Titel</label><textarea id="tracks" rows="8" aria-describedby="tracksHint" placeholder="Come Together 4:20&#10;Something 3:03"></textarea></div>
+    </div>
+    <p class="footnote" id="tracksHint" data-only="album">Ein Titel pro Zeile, Dauer optional am Ende.</p>
 
     <h2 id="colorsLabel">Farben</h2>
     <div class="group swatches" role="group" aria-labelledby="colorsLabel">
@@ -84,7 +126,9 @@
       <select id="format" aria-label="Dateiformat"><option value="png">PNG</option><option value="jpeg">JPG</option></select>
     </div>
     <button type="button" id="export" class="primary">Als PNG exportieren</button>
-    <p class="secondary"><span id="exportInfo">5906 × 8268 px</span> · Daten: <a href="https://www.wikidata.org" target="_blank" rel="noopener">Wikidata</a>, <a href="https://www.wikipedia.org" target="_blank" rel="noopener">Wikipedia</a></p>
+    <p class="secondary"><span id="exportInfo">5906 × 8268 px</span> · Daten:
+      <span data-only="game"><a href="https://www.wikidata.org" target="_blank" rel="noopener">Wikidata</a>, <a href="https://www.wikipedia.org" target="_blank" rel="noopener">Wikipedia</a></span>
+      <span data-only="album"><a href="https://musicbrainz.org" target="_blank" rel="noopener">MusicBrainz</a>, <a href="https://coverartarchive.org" target="_blank" rel="noopener">Cover Art Archive</a></span></p>
   </footer>
 </aside>
 <main id="main"><canvas id="preview" role="img" tabindex="0" aria-label="Postervorschau. Pfeiltasten verschieben den Bildausschnitt."></canvas></main>
