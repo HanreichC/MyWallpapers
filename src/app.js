@@ -1,114 +1,160 @@
 const $ = id => document.getElementById(id);
-const U = 1000, UH = 1400, M = 100, R = U - M, CW = U - 2 * M; // Layout in Einheiten: 1000 = 50 cm
-const EW = 5906, EH = 8268;                                     // 50 × 70 cm @ 300 dpi
-const IMG_TOP = 400; // fester Bildrahmen wie im Beispiel: Titel steht darüber, Beschreibung darunter
+const U = 1000, M = 100, R = U - M, CW = U - 2 * M; // Layout in Einheiten: Breite = 1000, Höhe je nach Format
 const BG = '#2b2b2b', FG = '#efe9dc';
 const font = (w, px) => `${w} ${px}px "TeX Gyre Heros", "Helvetica Neue", Helvetica, Arial, sans-serif`;
 const fontsReady = Promise.all([400, 700].map(w => document.fonts.load(font(w, 10)))); // Canvas wartet sonst nicht auf Webfonts
-const state = { image: null, logo: null, files: {}, dpi: 0, view: null, titleClash: false };
+const state = { image: null, logo: null, files: {}, dpi: 0, view: null, crowded: false };
+
+// Formate (Breite × Höhe in cm). Alle Maße in plan() sind für 50 × 70 am Star-Wars-Beispiel gemessen (Faktor 1).
+// Kleinere Formate bekommen relativ größere Schrift, und zwar mit der Wurzel der Breite: kleine Drucke liest man
+// aus der Nähe, große aus der Entfernung. Titel wachsen schwächer (Exponent 0,6), damit sie klein nicht erschlagen.
+const FORMATS = { a5: [14.8, 21], a4: [21, 29.7], a3: [29.7, 42], a2: [42, 59.4], a1: [59.4, 84.1],
+  '30x40': [30, 40], '40x50': [40, 50], '50x70': [50, 70], '60x90': [60, 90], '70x100': [70, 100] };
+function format() {
+  const key = FORMATS[$('size').value] ? $('size').value : '50x70', [w, h] = FORMATS[key], inch = 2.54;
+  // ponytail: höchstens 50 MP pro Export gegen Speicherabstürze im Browser, große Formate liegen daher unter 300 dpi
+  const dpi = Math.min(300, Math.floor(Math.sqrt(50e6 / (w / inch * h / inch))));
+  return { key, w, h, dpi, UH: U * h / w, px: [Math.round(w / inch * dpi), Math.round(h / inch * dpi)], t: Math.sqrt(50 / w) };
+}
 
 function wrap(ctx, text, maxW) {
   if (!text.trim()) return [];
   const out = [];
   for (const para of text.split('\n')) {
     let line = '';
+    const start = out.length;
     for (const word of para.split(/\s+/).filter(Boolean)) {
       const t = line ? line + ' ' + word : word;
       if (line && ctx.measureText(t).width > maxW) { out.push(line); line = word; } else line = t;
+    }
+    // kein einzelnes Wort allein in der letzten Zeile ("…Republic / II"), wenn die Zeile davor eins abgeben kann
+    const prev = out.length > start && out.at(-1).split(' ');
+    if (prev?.length > 2 && !line.includes(' ') && ctx.measureText(prev.at(-1) + ' ' + line).width <= maxW) {
+      line = prev.pop() + ' ' + line;
+      out[out.length - 1] = prev.join(' ');
     }
     out.push(line);
   }
   return out;
 }
 
+// Misst alle Texte aus und verteilt sie. b/h: Faktor für Fließtext/Titel; fit < 1 verkleinert alles, wenn das Bild sonst zu klein würde
+function plan(ctx, F, fit) {
+  const v = id => $(id).value, b = F.t * fit, h = F.t ** .6 * fit;
+  const L = { b, h, meta: [], title: [], bottom: F.UH - M };
+
+  // Meta rechts oben: "Label /" vor der ersten Zeile, Werte rechtsbündig; Versalhöhe bündig mit dem Farbbalken
+  let y = 84 + 8 * b, metaLeft = R, metaBottom = 0;
+  for (const [label, text] of [['Company', v('company')], ['Genres', v('genres')]]) {
+    const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+    if (!lines.length) continue;
+    ctx.font = font(400, 11.3 * b);
+    const widths = lines.map(l => ctx.measureText(l).width);
+    ctx.font = font(700, 11.3 * b);
+    L.meta.push({ label, lines, y, labelX: R - widths[0] - 7 * b });
+    metaLeft = Math.min(metaLeft, R - widths[0] - 7 * b - ctx.measureText(label + ' /').width, R - Math.max(...widths));
+    metaBottom = y + (lines.length - 1) * 12.8 * b + 3 * b;
+    y += (lines.length - 1) * 12.8 * b + 27 * b;
+  }
+
+  // Titel + Untertitel, rechts Platz fürs Logo; Laufweite: Helvetica Neue läuft ~3 % enger als Heros
+  const logo = state.logo;
+  L.ls = logo ? Math.min(110 * h / logo.width, 28 * h / logo.height) : 0;
+  const tw = CW - (logo ? logo.width * L.ls + 20 * h : 0);
+  for (const [size, text] of [[85, v('title')], [50, v('subtitle')]]) {
+    let px = size * h;
+    const setFont = () => { ctx.font = font(700, px); ctx.letterSpacing = -.028 * px + 'px'; };
+    setFont();
+    // eine Zeile, die nur knapp nicht passt, lieber bis 80 % verkleinern als umbrechen
+    const widest = Math.max(0, ...text.split('\n').map(l => ctx.measureText(l.trim()).width));
+    if (widest > tw) { px *= Math.max(.8, tw / widest); setFont(); }
+    wrap(ctx, text, tw).forEach((line, i) => L.title.push({ px, line, w: ctx.measureText(line).width, adv: px + (i ? 0 : 2 * h) }));
+  }
+  ctx.letterSpacing = '0px';
+  // Bildoberkante wie im Beispiel bei 2/7 der Höhe; tiefer, wenn der Titel sonst in Farbbalken oder Meta-Block ragt
+  L.imgTop = 400 / 1400 * F.UH;
+  for (let i = L.title.length - 1, off = 0; i >= 0; off += L.title[i--].adv) { // off: letzte Grundlinie → Grundlinie dieser Zeile
+    const t = L.title[i], above = M + t.w > metaLeft - 8 * b ? metaBottom + 8 * b : 84 + 20 * h;
+    L.imgTop = Math.max(L.imgTop, above + off + t.px * .72 + 23 * h);
+  }
+
+  // Unten: Beschreibung links, "/Jahr Datum" rechts, beides an der Grundlinie
+  const year = v('year'), day = v('day');
+  ctx.font = font(400, 14 * b);
+  const dayW = ctx.measureText(day).width;
+  ctx.font = font(700, 45 * b);
+  ctx.letterSpacing = -2.8 * b + 'px'; // Heros-Ziffern sind breiter als die von Helvetica Neue
+  L.slashX = R - Math.max(ctx.measureText(year).width, dayW) - 17 * b;
+  ctx.letterSpacing = '0px';
+  ctx.font = font(400, 11 * b);
+  L.desc = wrap(ctx, v('desc'), (year || day ? L.slashX - 20 * b : R) - M);
+  L.blockTop = L.bottom - Math.max(45.6 * b, 7.9 * b + (L.desc.length - 1) * 12.5 * b); // oben bündig mit dem Jahr
+  L.ih = L.blockTop - 24 * b - L.imgTop;
+  return L;
+}
+
 // o: Versatz in Pixeln (Beschnittzugabe), preview: Hinweise zeichnen, die nicht in den Export gehören
 function draw(ctx, s, o = 0, preview = false) {
-  const v = id => $(id).value;
+  const F = format(), v = id => $(id).value;
+  let L;
+  for (let i = 0; i <= 5; i++) { // Schrift in 5-%-Schritten bis 75 % verkleinern, bis das Bild mind. 45 % der Höhe hat
+    L = plan(ctx, F, 1 - i * .05);
+    if (L.ih >= .45 * F.UH) break;
+  }
+  state.crowded = L.ih < .45 * F.UH;
+  const { b, h } = L;
+
   ctx.setTransform(s, 0, 0, s, o, o);
   ctx.imageSmoothingQuality = 'high';
   ctx.textBaseline = 'alphabetic';
   ctx.fillStyle = BG;
-  ctx.fillRect(0, 0, U, UH);
-
+  ctx.fillRect(0, 0, U, F.UH);
   document.querySelectorAll('.swatches input').forEach((c, i) => {
     ctx.fillStyle = c.value;
-    ctx.fillRect(M + i * 34, 84, 34.5, 8.5);
+    ctx.fillRect(M + i * 34 * h, 84, 34.5 * h, 8.5 * h);
   });
 
-  // Meta rechts oben: "Label /" vor der ersten Zeile, Werte rechtsbündig
   ctx.fillStyle = FG;
   ctx.textAlign = 'right';
-  let y = 92, metaLeft = R, metaBottom = 0;
-  for (const [label, text] of [['Company', v('company')], ['Genres', v('genres')]]) {
-    const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
-    if (!lines.length) continue;
-    ctx.font = font(400, 11.3);
-    const widths = lines.map(l => ctx.measureText(l).width);
-    lines.forEach((l, i) => ctx.fillText(l, R, y + i * 12.8));
-    ctx.font = font(700, 11.3);
-    ctx.fillText(label + ' /', R - widths[0] - 7, y);
-    metaLeft = Math.min(metaLeft, R - widths[0] - 7 - ctx.measureText(label + ' /').width, R - Math.max(...widths));
-    metaBottom = y + (lines.length - 1) * 12.8 + 3;
-    y = metaBottom - 3 + 27;
+  for (const m of L.meta) {
+    ctx.font = font(400, 11.3 * b);
+    m.lines.forEach((l, i) => ctx.fillText(l, R, m.y + i * 12.8 * b));
+    ctx.font = font(700, 11.3 * b);
+    ctx.fillText(m.label + ' /', m.labelX, m.y);
   }
 
-  // Titel + Untertitel, rechts Platz fürs Logo lassen
-  const logo = state.logo;
-  const ls = logo ? Math.min(110 / logo.width, 28 / logo.height) : 0;
-  const tw = CW - (logo ? logo.width * ls + 20 : 0);
   ctx.textAlign = 'left';
-  // Größen, Zeilenabstände und Laufweite am Star-Wars-Beispiel gemessen; Helvetica Neue läuft ~3 % enger als Heros
-  const titleLines = []; // [Schriftgröße, Text, Abstand zur vorigen Grundlinie]
-  for (const [px, text] of [[85, v('title')], [50, v('subtitle')]]) {
-    ctx.font = font(700, px);
-    ctx.letterSpacing = -.028 * px + 'px';
-    wrap(ctx, text, tw).forEach((line, i) => titleLines.push([px, line, px + (i ? 0 : 2)]));
-  }
-  y = IMG_TOP - 23; // letzte Grundlinie sitzt auf dem Bild, weitere Zeilen wachsen nach oben
-  const clashes = []; // Titelzeilen, die in Farbbalken oder Meta-Block ragen
-  for (const [px, line, adv] of titleLines.reverse()) {
-    ctx.font = font(700, px);
-    ctx.letterSpacing = -.028 * px + 'px';
-    ctx.fillText(line, M, y);
-    const top = y - px * .72, w = ctx.measureText(line).width;
-    if (top < 95 || (M + w > metaLeft - 8 && top < metaBottom + 8)) clashes.push([M - 4, top - 4, w + 8, px * .72 + 8]);
-    y -= adv;
+  let y = L.imgTop - 23 * h; // letzte Grundlinie sitzt auf dem Bild, weitere Zeilen wachsen nach oben
+  for (const t of [...L.title].reverse()) {
+    ctx.font = font(700, t.px);
+    ctx.letterSpacing = -.028 * t.px + 'px';
+    ctx.fillText(t.line, M, y);
+    y -= t.adv;
   }
   ctx.letterSpacing = '0px';
-  state.titleClash = clashes.length > 0;
-  if (preview) {
-    ctx.strokeStyle = '#ff3b30';
-    ctx.lineWidth = 2;
-    clashes.forEach(r => ctx.strokeRect(...r));
-  }
-  if (logo) ctx.drawImage(logo, R - logo.width * ls, IMG_TOP - 13 - logo.height * ls, logo.width * ls, logo.height * ls);
+  const logo = state.logo;
+  if (logo) ctx.drawImage(logo, R - logo.width * L.ls, L.imgTop - 13 * h - logo.height * L.ls, logo.width * L.ls, logo.height * L.ls);
 
-  // Unten: Beschreibung links, "/Jahr Datum" rechts, beides an der Grundlinie UH - M
-  const bottom = UH - M, year = v('year'), day = v('day');
-  ctx.font = font(400, 14);
-  const dayW = ctx.measureText(day).width;
+  const year = v('year'), day = v('day');
   ctx.textAlign = 'right';
-  ctx.fillText(day, R, bottom);
-  ctx.font = font(700, 45);
-  ctx.letterSpacing = '-2.8px'; // Heros-Ziffern sind breiter als die von Helvetica Neue
-  const slashX = R - Math.max(ctx.measureText(year).width, dayW) - 17;
-  ctx.fillText(year, R, bottom - 13);
+  ctx.font = font(400, 14 * b);
+  ctx.fillText(day, R, L.bottom);
+  ctx.font = font(700, 45 * b);
+  ctx.letterSpacing = -2.8 * b + 'px';
+  ctx.fillText(year, R, L.bottom - 13 * b);
   ctx.letterSpacing = '0px';
   if (year || day) {
     ctx.strokeStyle = FG;
-    ctx.lineWidth = 3;
-    ctx.beginPath(); ctx.moveTo(slashX, bottom); ctx.lineTo(slashX + 11.4, bottom - 45.6); ctx.stroke();
+    ctx.lineWidth = 3 * b;
+    ctx.beginPath(); ctx.moveTo(L.slashX, L.bottom); ctx.lineTo(L.slashX + 11.4 * b, L.bottom - 45.6 * b); ctx.stroke();
   }
-  ctx.font = font(400, 11);
+  ctx.font = font(400, 11 * b);
   ctx.textAlign = 'left';
-  const lines = wrap(ctx, v('desc'), (year || day ? slashX - 20 : R) - M);
-  const blockTop = bottom - Math.max(45.6, 7.9 + (lines.length - 1) * 12.5); // oben bündig mit dem Jahr
-  lines.forEach((l, i) => ctx.fillText(l, M, blockTop + 7.9 + i * 12.5));
+  L.desc.forEach((l, i) => ctx.fillText(l, M, L.blockTop + 7.9 * b + i * 12.5 * b));
 
-  // Bild im festen Rahmen; nur sehr lange Beschreibungen kürzen ihn unten.
-  // Zoom 1 = füllt den Rahmen, < 1 = kleiner als der Rahmen (Rest schwarz), > 1 = hineingezoomt.
+  // Bild im Rahmen. Zoom 1 = füllt den Rahmen, < 1 = kleiner als der Rahmen (Rest schwarz), > 1 = hineingezoomt.
   // cropX/cropY (0…1) positionieren das Bild im Spielraum (CW - Bildbreite), egal ob es übersteht oder Luft hat
-  const imgTop = IMG_TOP, ih = blockTop - 24 - imgTop;
+  const imgTop = L.imgTop, ih = L.ih;
   ctx.fillStyle = '#000';
   ctx.fillRect(M, imgTop, CW, ih);
   const img = state.image;
@@ -120,11 +166,11 @@ function draw(ctx, s, o = 0, preview = false) {
     ctx.beginPath(); ctx.rect(M, imgTop, CW, ih); ctx.clip();
     ctx.drawImage(img, M + slackX * v('cropX'), imgTop + slackY * v('cropY'), dw, dh);
     ctx.restore();
-    state.dpi = img.width / (dw * 50 / U / 2.54); // Quellpixel pro Zoll im Druck
+    state.dpi = img.width / (dw / U * F.w / 2.54); // Quellpixel pro Zoll im Druck
     state.view = { top: imgTop, ih, slackX, slackY };
   } else if (preview) {
     ctx.fillStyle = 'rgba(239, 233, 220, .5)';
-    ctx.font = font(400, 16);
+    ctx.font = font(400, 16 * b);
     ctx.textAlign = 'center';
     ctx.fillText('Bild hier ablegen oder links auswählen', U / 2, imgTop + ih / 2);
   }
@@ -182,19 +228,22 @@ function render() {
   frame = requestAnimationFrame(() => {
     const cs = getComputedStyle(main);
     const w = main.clientWidth - parseFloat(cs.paddingLeft) * 2, h = main.clientHeight - parseFloat(cs.paddingTop) * 2;
-    const cssW = Math.max(50, Math.min(w, h * U / UH)), dpr = devicePixelRatio || 1;
+    const F = format(), cssW = Math.max(50, Math.min(w, h * U / F.UH)), dpr = devicePixelRatio || 1;
     preview.style.width = cssW + 'px';
-    preview.style.height = cssW * UH / U + 'px';
+    preview.style.height = cssW * F.UH / U + 'px';
     preview.width = Math.round(cssW * dpr);
-    preview.height = Math.round(cssW * UH / U * dpr);
+    preview.height = Math.round(cssW * F.UH / U * dpr);
     draw(preview.getContext('2d'), preview.width / U, 0, true);
-    $('titleWarn').textContent = state.titleClash ? 'Der Titel ragt in die Angaben oben rechts. Kürzen oder Zeilen umbrechen.' : '';
-    const [w2, h2] = exportSize(), jpg = $('format').value === 'jpeg';
+    const amb = $('ambient'); // winzige Kopie des Posters, per CSS weichgezeichnet: Umgebungslicht für die Glasebene
+    amb.width = 40; amb.height = Math.round(40 * F.UH / U);
+    amb.getContext('2d').drawImage(preview, 0, 0, amb.width, amb.height);
+    $('titleWarn').textContent = state.crowded ? 'Zu viel Text für dieses Format: Titel oder Beschreibung kürzen.' : '';
+    const [w2, h2] = exportSize(), jpg = $('format').value === 'jpeg', cm = n => n.toLocaleString('de-DE');
     $('export').textContent = `Als ${jpg ? 'JPG' : 'PNG'} exportieren`;
-    $('exportInfo').textContent = `${w2} × ${h2} px` + ($('bleed').checked ? ' (50,6 × 70,6 cm inkl. Beschnitt)' : '');
+    $('exportInfo').textContent = `${w2} × ${h2} px · ${F.dpi} dpi` + ($('bleed').checked ? ` (${cm(F.w + .6)} × ${cm(F.h + .6)} cm inkl. Beschnitt)` : '');
     if (!SELFTEST) try { localStorage.setItem('poster', JSON.stringify(snapshot())); } catch {}
     if (!upscaling) {
-      const need = state.image ? Math.min(4, 300 / state.dpi) : 0;
+      const need = state.image ? Math.min(4, F.dpi / state.dpi) : 0;
       $('upscale').disabled = need <= 1.05;
       $('upscaleInfo').textContent = !state.image ? '' : need <= 1.05 ? 'Auflösung reicht bereits' : `≈ ${Math.round(state.dpi)} → ${Math.round(state.dpi * need)} dpi`;
     }
@@ -205,12 +254,12 @@ function render() {
 }
 document.addEventListener('input', e => {
   if (e.target.id === 'title') $('website').value = ''; // Titel von Hand geändert → Website gehört evtl. zu einem anderen Spiel
-  if (e.target.id !== 'apiKey') render();
+  render();
 });
 
 // Speichern: Felder in localStorage, Bilder in IndexedDB (localStorage ist dafür zu klein), Projekte als Datei
 const SELFTEST = location.hash === '#selftest'; // Selbsttest darf gespeicherte Arbeit nicht überschreiben
-const saved = () => document.querySelectorAll('#form input[id]:not([type=file]):not(#game), #form textarea, #bleed, #format');
+const saved = () => document.querySelectorAll('#form input[id]:not([type=file]):not(#game), #form textarea, #bleed, #format, #size');
 const snapshot = () => Object.fromEntries([...saved()].map(el => [el.id, el.type === 'checkbox' ? el.checked : el.value]));
 function restore(data) {
   for (const el of saved()) if (data && el.id in data) el[el.type === 'checkbox' ? 'checked' : 'value'] = data[el.id];
@@ -338,22 +387,17 @@ main.ondragover = e => { e.preventDefault(); main.classList.add('drag'); };
 main.ondragleave = () => main.classList.remove('drag');
 main.ondrop = e => { e.preventDefault(); main.classList.remove('drag'); loadImage(e.dataTransfer.files[0], 'image'); };
 
-// RAWG: Spiel suchen, Felder füllen
-const rawgKey = () => { try { return localStorage.getItem('rawgKey') || ''; } catch { return ''; } };
-async function rawg(path, params = {}) {
-  const r = await fetch(`https://api.rawg.io/api/${path}?` + new URLSearchParams({ key: rawgKey(), ...params }));
-  if (!r.ok) throw new Error(r.status === 401 || r.status === 403 ? 'API-Key ungültig.' : `RAWG-Fehler ${r.status}.`);
-  return r.json();
-}
-function fromRawg(g) {
+// Spieldaten: Wikidata (Fakten, Logo, Steam-Nummer) + Wikipedia (Beschreibung, Cover). Frei, ohne Key,
+// sehr vollständig bei bekannten Spielen und kennt auch Abkürzungen wie "kotor"
+function gameFields(g) {
   const [title, ...rest] = g.name.split(': ');
-  const para = (g.description_raw || '').split(/\n+/)[0].trim();
+  const para = (g.description || '').split(/\n+/)[0].trim();
   const d = g.released && new Date(g.released);
   return {
     title: rest.length ? title + ':' : title,
     subtitle: rest.join(': ').replace(/ - /g, '\n'),
-    company: g.developers?.[0]?.name ?? '',
-    genres: (g.genres || []).map(x => x.name).join('\n'),
+    company: g.developer || '',
+    genres: (g.genres || []).join('\n'),
     desc: para.length > 500 ? para.slice(0, para.lastIndexOf('. ', 499) + 1) || para.slice(0, 500) : para, // am Satzende kürzen
     year: d ? String(d.getUTCFullYear()) : '',
     day: d ? d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }) : '',
@@ -362,80 +406,74 @@ function fromRawg(g) {
 }
 const gameStatus = t => $('gameStatus').textContent = t ?? '';
 const errText = e => e instanceof TypeError ? 'Keine Verbindung zur Spieldatenbank. Internet prüfen.' : e.message;
-const rawgGame = id => async () => {
-  const [g, stores] = await Promise.all([rawg(`games/${id}`), rawg(`games/${id}/stores`).catch(() => ({ results: [] }))]);
-  return { fields: fromRawg(g), image: g.background_image, appId: steamAppId(stores.results || []) };
-};
-async function rawgSearch(q) {
-  const { results } = await rawg('games', { search: q, page_size: 10 });
-  return results.map(g => ({ name: g.name, year: g.released?.slice(0, 4), info: (g.platforms || []).slice(0, 3).map(p => p.platform?.name).join(', '),
-    source: 'RAWG', load: rawgGame(g.id) }));
-}
-
-// Wikidata + Wikipedia: frei, ohne Key, sehr vollständig bei bekannten Spielen, kennt auch Abkürzungen wie "kotor"
-async function wd(params) {
-  const r = await fetch('https://www.wikidata.org/w/api.php?' + new URLSearchParams({ format: 'json', origin: '*', ...params }));
-  if (!r.ok) throw new Error(`Wikidata-Fehler ${r.status}.`);
+async function wm(host, params) { // MediaWiki-API (Wikidata, Commons), origin=* erlaubt den Zugriff aus dem Browser
+  const r = await fetch(`https://${host}/w/api.php?` + new URLSearchParams({ format: 'json', origin: '*', ...params }));
+  if (!r.ok) throw new Error(`${host}: Fehler ${r.status}.`);
   return r.json();
 }
+const wd = params => wm('www.wikidata.org', params);
 const claims = (e, p) => (e?.claims?.[p] || []).map(c => c.mainsnak?.datavalue?.value).filter(Boolean);
 const wdLabel = e => (e?.labels?.en || e?.labels?.mul || e?.labels?.de)?.value || '';
 const wdDate = e => claims(e, 'P577').filter(t => t.precision >= 9) // früheste Angabe mit der genauesten Präzision
   .sort((a, b) => b.precision - a.precision || a.time.localeCompare(b.time))[0];
 const genreName = s => s.replace(/ (video )?games?$/i, '').replace(/(^|[\s-])\S/g, c => c.toUpperCase()); // "racing video game" → "Racing"
 async function wikidataSearch(q) {
-  const ids = (await wd({ action: 'query', list: 'search', srsearch: q + ' haswbstatement:P31=Q7889', srlimit: 8 })).query.search.map(r => r.title);
+  const ids = (await wd({ action: 'query', list: 'search', srsearch: q + ' haswbstatement:P31=Q7889', srlimit: 10 })).query.search.map(r => r.title);
   if (!ids.length) return [];
   const { entities } = await wd({ action: 'wbgetentities', ids: ids.join('|'), props: 'labels|claims|sitelinks', languages: 'en|mul|de' });
-  return ids.map(id => entities[id]).filter(wdLabel)
-    .map(e => ({ name: wdLabel(e), year: wdDate(e)?.time.slice(1, 5), source: 'Wikidata', load: () => wikidataGame(e) }));
+  return ids.map(id => entities[id]).filter(wdLabel).map(e => ({ name: wdLabel(e), year: wdDate(e)?.time.slice(1, 5), load: () => wikidataGame(e) }));
 }
 async function wikidataGame(e) {
-  const dev = claims(e, 'P178')[0]?.id, genres = claims(e, 'P136').map(v => v.id).slice(0, 6);
+  const dev = claims(e, 'P178')[0]?.id, genres = claims(e, 'P136').map(v => v.id).slice(0, 6), logoFile = claims(e, 'P154')[0];
   const ids = [dev, ...genres].filter(Boolean);
-  const names = ids.length ? (await wd({ action: 'wbgetentities', ids: ids.join('|'), props: 'labels', languages: 'en|mul|de' })).entities : {};
   const [lang, page] = e.sitelinks?.enwiki ? ['en', e.sitelinks.enwiki.title] : e.sitelinks?.dewiki ? ['de', e.sitelinks.dewiki.title] : [];
-  const summary = page ? await fetch(`https://${lang}.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(page)}`)
-    .then(r => r.ok ? r.json() : {}, () => ({})) : {};
-  const date = wdDate(e);
-  const fields = fromRawg({
+  const [names, summary, logo] = await Promise.all([
+    ids.length ? wd({ action: 'wbgetentities', ids: ids.join('|'), props: 'labels', languages: 'en|mul|de' }).then(r => r.entities) : {},
+    page ? fetch(`https://${lang}.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(page)}`).then(r => r.ok ? r.json() : {}, () => ({})) : {},
+    // Commons liefert per API direkt eine PNG-Adresse, auch für SVG-Logos (Weiterleitungen dort hätten keine CORS-Freigabe)
+    logoFile ? wm('commons.wikimedia.org', { action: 'query', titles: 'File:' + logoFile, prop: 'imageinfo', iiprop: 'url', iiurlwidth: 1200 })
+      .then(r => Object.values(r.query.pages)[0]?.imageinfo?.[0]?.thumburl, () => null) : null,
+  ]);
+  const date = wdDate(e), steam = claims(e, 'P1733')[0];
+  const fields = gameFields({
     name: wdLabel(e),
     released: date?.precision >= 11 ? date.time.slice(1, 11) : undefined,
-    developers: dev ? [{ name: wdLabel(names[dev]) }] : [],
-    genres: [...new Set(genres.map(id => genreName(wdLabel(names[id]))).filter(Boolean))].map(name => ({ name })),
-    description_raw: summary.extract,
+    developer: dev && wdLabel(names[dev]),
+    genres: [...new Set(genres.map(id => genreName(wdLabel(names[id]))).filter(Boolean))],
+    description: summary.extract,
     website: claims(e, 'P856')[0],
   });
   if (!fields.year && date) fields.year = date.time.slice(1, 5);
-  return { fields, appId: claims(e, 'P1733')[0] };
+  return {
+    fields,
+    image: summary.originalimage?.source, // Cover aus dem Wikipedia-Artikel, meist nur ~300 px: Platzhalter
+    logos: [steam && ['Steam-Logo.png', `https://shared.steamstatic.com/store_item_assets/steam/apps/${steam}/logo.png`],
+      logo && ['Wikidata-Logo.png', logo]].filter(Boolean), // Steam zuerst: verlässlicher und meist hell für dunkle Poster
+  };
 }
-
 async function applyGame(load) {
   gameStatus('Wird geladen…');
   try {
-    const { fields, image, appId } = await load();
+    const { fields, image, logos } = await load();
     Object.entries(fields).forEach(([k, v]) => $(k).value = v);
-    await Promise.all([
-      autoImage('image', 'RAWG-Bild.jpg', image), // nur Platzhalter, zu klein für den Druck
-      autoImage('logo', 'Steam-Logo.png', appId && `https://shared.steamstatic.com/store_item_assets/steam/apps/${appId}/logo.png`),
-    ]);
+    await Promise.all([autoImage('image', image ? [['Wikipedia-Cover.jpg', image]] : []), autoImage('logo', logos)]);
     gameStatus();
     render();
   } catch (err) { gameStatus(errText(err)); }
 }
-const steamAppId = stores => stores.map(s => s.url?.match(/store\.steampowered\.com\/app\/(\d+)/)?.[1]).find(Boolean);
-// Automatisch geladene Bilder ersetzen sich beim nächsten Spiel, eigene Uploads bleiben
-async function autoImage(key, name, url) {
-  if (state[key] && $(key + 'Name').textContent !== name) return;
+// Automatisch geladene Bilder ersetzen sich beim nächsten Spiel, eigene Uploads bleiben. sources: [[Name, URL], …], erste ladbare gewinnt
+const AUTO = new Set(['Wikipedia-Cover.jpg', 'Steam-Logo.png', 'Wikidata-Logo.png']);
+async function autoImage(key, sources) {
+  if (state[key] && !AUTO.has($(key + 'Name').textContent)) return;
   clearImage(key);
-  const missing = () => { if (key === 'logo') $(key + 'Name').textContent = 'Kein Steam-Logo gefunden'; };
-  if (!url) return missing();
-  try {
-    const r = await fetch(url);
-    if (!r.ok) return missing();
-    const b = await r.blob();
-    await loadImage(new File([b], name, { type: b.type }), key);
-  } catch {}
+  for (const [name, url] of sources) {
+    try {
+      const r = await fetch(url);
+      const b = r.ok && await r.blob();
+      if (b?.type.startsWith('image/')) return await loadImage(new File([b], name, { type: b.type }), key);
+    } catch {}
+  }
+  if (key === 'logo') $('logoName').textContent = 'Kein Logo gefunden';
 }
 // Bildquellen: öffnen die jeweilige Suche mit dem Spielnamen (ohne Key)
 const SEARCH = {
@@ -457,22 +495,17 @@ document.querySelectorAll('[data-search]').forEach(a => a.onclick = () => {
 let searchTimer, searchSeq = 0;
 async function searchGames(q) {
   const seq = ++searchSeq;
-  const results = await Promise.allSettled([wikidataSearch(q), rawgKey() ? rawgSearch(q) : []]);
+  let hits;
+  try { hits = await wikidataSearch(q); }
+  catch (err) { if (seq === searchSeq) gameStatus(errText(err)); return; }
   if (seq !== searchSeq) return; // Antwort auf eine ältere Eingabe
-  const seen = new Set(), hits = [];
-  for (const h of results.flatMap(r => r.value || [])) { // gleiches Spiel aus beiden Quellen nur einmal, Wikidata zuerst
-    const key = h.name.toLowerCase().replace(/[^a-z0-9]/g, '') + h.year;
-    if (!seen.has(key)) { seen.add(key); hits.push(h); }
-  }
   $('games').replaceChildren(...hits.map(h => {
     const b = Object.assign(document.createElement('button'), { type: 'button', className: 'result' });
-    b.append(h.name, Object.assign(document.createElement('span'), { textContent: [h.year, h.info, h.source].filter(Boolean).join(' · ') }));
+    b.append(h.name, Object.assign(document.createElement('span'), { textContent: h.year || '' }));
     b.onclick = () => { $('game').value = h.name; $('games').replaceChildren(); applyGame(h.load); };
     return b;
   }));
-  const failed = results.find(r => r.status === 'rejected')?.reason;
-  gameStatus(hits.length ? failed && `Nicht alle Quellen erreichbar: ${errText(failed)}`
-    : failed ? errText(failed) : 'Kein Spiel gefunden. Englischen Originaltitel versuchen.');
+  gameStatus(hits.length ? undefined : 'Kein Spiel gefunden. Englischen Originaltitel versuchen.');
 }
 $('game').oninput = e => {
   const q = e.target.value.trim();
@@ -492,25 +525,6 @@ $('games').onkeydown = e => {
   if (next) { e.preventDefault(); next.focus(); }
   if (e.key === 'Escape') { $('games').replaceChildren(); $('game').focus(); }
 };
-$('openSettings').onclick = () => {
-  $('apiKey').value = rawgKey();
-  $('keyStatus').textContent = 'Wird nur in diesem Browser gespeichert.';
-  $('settings').showModal();
-};
-$('settingsForm').onsubmit = async e => {
-  e.preventDefault();
-  const key = $('apiKey').value.trim();
-  $('keyStatus').textContent = 'Wird geprüft…';
-  try {
-    if (key) await rawg('games', { key, page_size: 1 });
-    try { localStorage.setItem('rawgKey', key); } catch { throw new Error('Speichern im Browser nicht möglich (privates Fenster?).'); }
-    gameStatus();
-    $('settings').close();
-  } catch (err) {
-    $('keyStatus').textContent = err instanceof TypeError ? 'RAWG nicht erreichbar. Internetverbindung prüfen.' : err.message;
-  }
-};
-gameStatus();
 
 // KI-Hochskalieren mit ESRGAN (RDN, 4×) über TensorFlow.js. build.py bettet vendor/ als inaktive
 // <script type="text/plain">-Blöcke ein; ausgeführt werden sie erst beim ersten Klick (schneller Seitenstart)
@@ -556,7 +570,7 @@ $('upscale').onclick = async ({ currentTarget: b }) => {
   const img = state.image, file = state.files.image;
   if (!img) return;
   const MAX_PX = 50e6; // ponytail: feste Obergrenze gegen Speicherabstürze; besser wäre, sie aus dem Gerätespeicher abzuleiten
-  let targetW = img.width * Math.min(4, 300 / state.dpi) * 1.02;
+  let targetW = img.width * Math.min(4, format().dpi / state.dpi) * 1.02;
   targetW = Math.min(targetW, Math.sqrt(MAX_PX * img.width / img.height));
   upscaling = b.disabled = true;
   const bar = $('upscaleProgress');
@@ -577,14 +591,14 @@ $('upscale').onclick = async ({ currentTarget: b }) => {
   }
 };
 
-const BLEED = Math.round(3 / 25.4 * 300); // 3 mm @ 300 dpi
-const exportSize = () => { const b = $('bleed').checked ? 2 * BLEED : 0; return [EW + b, EH + b]; };
+const bleedPx = F => Math.round(3 / 25.4 * F.dpi); // 3 mm Beschnitt
+const exportSize = () => { const F = format(), b = $('bleed').checked ? 2 * bleedPx(F) : 0; return [F.px[0] + b, F.px[1] + b]; };
 function renderFull() {
-  const c = document.createElement('canvas'), ctx = c.getContext('2d');
+  const c = document.createElement('canvas'), ctx = c.getContext('2d'), F = format();
   [c.width, c.height] = exportSize();
   ctx.fillStyle = BG;
   ctx.fillRect(0, 0, c.width, c.height); // Beschnittzugabe in Hintergrundfarbe
-  draw(ctx, EW / U, (c.width - EW) / 2);
+  draw(ctx, F.px[0] / U, (c.width - F.px[0]) / 2);
   return c;
 }
 $('export').onclick = async ({ currentTarget: b }) => {
@@ -595,7 +609,7 @@ $('export').onclick = async ({ currentTarget: b }) => {
     const c = renderFull();
     const type = 'image/' + $('format').value;
     const blob = await new Promise((ok, fail) => c.toBlob(b => b ? ok(b) : fail(new Error('Canvas zu groß für diesen Browser')), type, .92));
-    download(await withDpi(blob, 300), fileName() + (type === 'image/jpeg' ? '.jpg' : '.png'));
+    download(await withDpi(blob, format().dpi), `${fileName()}-${format().key}${type === 'image/jpeg' ? '.jpg' : '.png'}`);
   } catch (err) {
     alert('Export fehlgeschlagen: ' + err.message);
   } finally {
@@ -626,42 +640,53 @@ if (location.hash === '#selftest') (async () => {
     const ctx = preview.getContext('2d');
     ctx.font = font(400, 10);
     ok(wrap(ctx, 'aa bb cc', 1).length === 3 && wrap(ctx, 'aa bb\n\ncc', 1e4).length === 3 && !wrap(ctx, ' ', 1).length, 'wrap');
-    const f = fromRawg({ name: 'Star Wars: Knights of the Old Republic II - The Sith Lords', released: '2004-12-06',
-      developers: [{ name: 'Obsidian Entertainment' }], genres: [{ name: 'Action' }, { name: 'RPG' }], description_raw: 'Aa bb. '.repeat(100) + '\nZweiter Absatz' });
+    const wr = ctx.measureText('aa bb cc dd').width + 1; // "aa bb cc dd ee" würde "ee" allein lassen
+    ok(wrap(ctx, 'aa bb cc dd ee', wr).join('|') === 'aa bb cc|dd ee', 'wrap ohne einzelnes Wort am Ende');
+    const f = gameFields({ name: 'Star Wars: Knights of the Old Republic II - The Sith Lords', released: '2004-12-06',
+      developer: 'Obsidian Entertainment', genres: ['Action', 'RPG'], description: 'Aa bb. '.repeat(100) + '\nZweiter Absatz', website: 'https://x.y/' });
     ok(f.title === 'Star Wars:' && f.subtitle === 'Knights of the Old Republic II\nThe Sith Lords' && f.company === 'Obsidian Entertainment'
-      && f.genres === 'Action\nRPG' && f.year === '2004' && f.day === 'Dec 6' && f.desc.length <= 500 && f.desc.endsWith('.'), 'fromRawg');
-    const h = fromRawg({ name: 'Hollow Knight' });
-    ok(h.title === 'Hollow Knight' && h.subtitle === '' && h.year === '' && h.desc === '', 'fromRawg minimal');
-    // Wikidata/Wikipedia simulieren: Treffer muss trotz Doppelpunkt erscheinen und alle Felder füllen
+      && f.genres === 'Action\nRPG' && f.year === '2004' && f.day === 'Dec 6' && f.desc.length <= 500 && f.desc.endsWith('.') && f.website === 'https://x.y/', 'gameFields');
+    const h = gameFields({ name: 'Hollow Knight' });
+    ok(h.title === 'Hollow Knight' && h.subtitle === '' && h.year === '' && h.desc === '' && h.company === '', 'gameFields minimal');
+
+    // Wikidata/Wikipedia/Commons simulieren: Treffer trotz Doppelpunkt, alle Felder, Cover, Logo-Rückfall Steam → Wikidata
     const realFetch = window.fetch, v = value => ({ mainsnak: { datavalue: { value } } });
+    const tinyPng = await new OffscreenCanvas(4, 4).convertToBlob();
     const fake = {
       Q1: { id: 'Q1', labels: { en: { value: 'Need for Speed: Most Wanted' } }, sitelinks: { enwiki: { title: 'Need for Speed: Most Wanted (2012 video game)' } },
         claims: { P577: [v({ time: '+2012-00-00T00:00:00Z', precision: 9 }), v({ time: '+2012-10-30T00:00:00Z', precision: 11 })], P178: [v({ id: 'Q2' })],
-          P136: [v({ id: 'Q3' }), v({ id: 'Q4' })], P856: [v('https://www.ea.com/nfs')], P1733: [v('1262560')] } },
+          P136: [v({ id: 'Q3' }), v({ id: 'Q4' })], P856: [v('https://www.ea.com/nfs')], P1733: [v('1262560')], P154: [v('NFS Logo.svg')] } },
       Q2: { labels: { mul: { value: 'Criterion Games' } } }, Q3: { labels: { en: { value: 'racing video game' } } }, Q4: { labels: { en: { value: 'open world' } } },
     };
     window.fetch = async url => {
       const u = new URL(url), json = o => new Response(JSON.stringify(o));
-      if (u.hostname.endsWith('wikipedia.org')) return json({ extract: 'Need for Speed: Most Wanted is a 2012 racing game.\nZweiter Absatz.' });
+      if (u.hostname.endsWith('wikipedia.org')) return json({ extract: 'Need for Speed: Most Wanted is a 2012 racing game.\nZweiter Absatz.', originalimage: { source: 'https://upload.wikimedia.org/cover.jpg' } });
+      if (u.hostname === 'commons.wikimedia.org') return json({ query: { pages: { 1: { imageinfo: [{ thumburl: 'https://upload.wikimedia.org/logo.png' }] } } } });
+      if (u.hostname === 'upload.wikimedia.org') return new Response(tinyPng);
+      if (u.hostname.includes('steamstatic')) return new Response('', { status: 404 }); // kein Steam-Logo → Wikidata-Logo
       if (u.searchParams.get('list') === 'search') return json({ query: { search: [{ title: 'Q1' }] } });
       return json({ entities: Object.fromEntries(u.searchParams.get('ids').split('|').map(id => [id, fake[id]])) });
     };
     try {
       await searchGames('need for speed most wanted');
-      ok($('games').children.length === 1 && $('games').textContent === 'Need for Speed: Most Wanted2012 · Wikidata', 'Wikidata-Suche');
+      ok($('games').children.length === 1 && $('games').textContent === 'Need for Speed: Most Wanted2012', 'Wikidata-Suche');
       const w = await wikidataGame(fake.Q1);
       ok(w.fields.title === 'Need for Speed:' && w.fields.subtitle === 'Most Wanted' && w.fields.company === 'Criterion Games'
         && w.fields.genres === 'Racing\nOpen World' && w.fields.year === '2012' && w.fields.day === 'Oct 30'
-        && w.fields.desc === 'Need for Speed: Most Wanted is a 2012 racing game.' && w.fields.website === 'https://www.ea.com/nfs' && w.appId === '1262560', 'Wikidata-Felder');
+        && w.fields.desc === 'Need for Speed: Most Wanted is a 2012 racing game.' && w.fields.website === 'https://www.ea.com/nfs', 'Wikidata-Felder');
+      ok(w.image === 'https://upload.wikimedia.org/cover.jpg' && w.logos.map(l => l[0]).join() === 'Steam-Logo.png,Wikidata-Logo.png'
+        && w.logos[0][1].includes('/1262560/') && w.logos[1][1] === 'https://upload.wikimedia.org/logo.png', 'Cover und Logo-Quellen');
+      await applyGame(() => wikidataGame(fake.Q1));
+      ok($('imageName').textContent === 'Wikipedia-Cover.jpg' && $('logoName').textContent === 'Wikidata-Logo.png' && state.logo, 'Logo-Rückfall auf Wikidata');
+      state.files.logo = new File([tinyPng], 'mein-logo.png'); $('logoName').textContent = 'mein-logo.png'; // eigener Upload bleibt
+      await autoImage('logo', w.logos);
+      ok($('logoName').textContent === 'mein-logo.png', 'eigenes Logo bleibt');
     } finally { window.fetch = realFetch; }
     $('games').replaceChildren();
-    ok(fromRawg({ name: 'X', website: 'https://www.teamcherry.com.au/' }).website === 'https://www.teamcherry.com.au/', 'fromRawg website');
     $('website').value = 'https://www.teamcherry.com.au/';
     ok(decodeURIComponent(SEARCH.presskit('Hollow Knight')).includes('site:teamcherry.com.au'), 'Presskit auf offizieller Seite');
     $('website').value = 'kein link';
     ok(decodeURIComponent(SEARCH.presskit('Hollow Knight').replace(/\+/g, ' ')).includes('"Hollow Knight" press kit'), 'Presskit ohne Website');
-    ok(steamAppId([{ url: 'https://www.gog.com/game/x' }, { url: 'https://store.steampowered.com/app/367520/Hollow_Knight/' }]) === '367520'
-      && steamAppId([{ url: '' }]) === undefined, 'steamAppId');
     const jpg = new Uint8Array(await (await withDpi(await new OffscreenCanvas(2, 2).convertToBlob({ type: 'image/jpeg' }), 300)).arrayBuffer());
     ok(jpg[13] === 1 && jpg[14] * 256 + jpg[15] === 300, 'JPG-DPI');
 
@@ -674,14 +699,25 @@ if (location.hash === '#selftest') (async () => {
     ok(state.image && !state.logo && $('title').value === 'Star Wars:' && $('color1').value === '#7a1f1a', 'Projekt öffnen');
     ok(JSON.stringify(snapshot()) === JSON.stringify((restore(snapshot()), snapshot())), 'snapshot/restore');
 
-    // Titel-Kollision
-    draw(ctx, preview.width / U);
-    ok(!state.titleClash, 'keine Kollision im Beispiel');
+    // Layout: 50 × 70 exakt wie gemessen (Faktor 1, Bild ab 400); langer Titel schiebt das Bild nach unten statt in die Genres
+    let L = plan(ctx, format(), 1);
+    ok(L.b === 1 && L.h === 1 && Math.abs(L.imgTop - 400) < 1e-9 && L.meta[0].y === 92 && L.bottom === 1300, '50 × 70 unverändert');
     const t = $('title').value;
     $('title').value = 'Wwwwwwwwwwww Wwwwwwwwwwwww Wwwwwwwwwwww';
-    draw(ctx, preview.width / U);
-    ok(state.titleClash, 'Kollision erkannt');
+    ok(plan(ctx, format(), 1).imgTop > 450, 'langer Titel schiebt Bild nach unten');
     $('title').value = t;
+    // Jedes Format: Beispiel mit langer Beschreibung passt, kleine Formate haben relativ größere Schrift
+    for (const size of Object.keys(FORMATS)) {
+      $('size').value = size;
+      draw(ctx, preview.width / U);
+      ok(!state.crowded && state.view.ih >= .45 * format().UH, 'genug Platz fürs Bild in ' + size);
+    }
+    $('size').value = 'a5';
+    ok(plan(ctx, format(), 1).b > 1.8 && format().dpi === 300, 'A5: größere Schrift, 300 dpi');
+    $('size').value = '70x100';
+    ok(format().px[0] * format().px[1] <= 50e6 && format().dpi < 300, '70 × 100: höchstens 50 MP');
+    $('size').value = '50x70';
+    ok(format().px.join() === '5906,8268', '50 × 70: 5906 × 8268 px');
 
     // Ausschnitt: verschieben bleibt in 0…1, Zoom verkleinert die Quellfläche
     draw(ctx, preview.width / U);
@@ -713,7 +749,7 @@ if (location.hash === '#selftest') (async () => {
     console.log('upscale', tf.getBackend(), Math.round(performance.now() - t0) + ' ms', 'diff', diff.toFixed(2));
     window.upscaleInfo = `${tf.getBackend()} ${Math.round(performance.now() - t0)} ms diff ${diff.toFixed(2)}`;
 
-    const px = renderFull().getContext('2d').getImageData(EW - 1, EH - 1, 1, 1).data;
+    const [EW, EH] = format().px, px = renderFull().getContext('2d').getImageData(EW - 1, EH - 1, 1, 1).data;
     ok(px[3] === 255 && px[0] === 0x2b, 'Export in voller Größe');
     $('bleed').checked = true;
     const c = renderFull();

@@ -7,14 +7,16 @@
 <!-- build:css -->
 </head>
 <body>
+<canvas id="ambient" aria-hidden="true"></canvas>
 <aside>
   <header>
-    <div><h1>Poster</h1><p class="secondary">50 × 70 cm · 300 dpi</p></div>
-    <button type="button" id="openSettings" class="icon" aria-label="Einstellungen" title="Einstellungen">
-      <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" aria-hidden="true"><circle cx="10" cy="10" r="7" stroke-width="3.2" stroke-dasharray="2.4 3.1"/><circle cx="10" cy="10" r="5" stroke-width="1.6"/><circle cx="10" cy="10" r="1.8" stroke-width="1.6"/></svg>
-    </button>
+    <div><h1>Poster</h1>
+      <select id="size" aria-label="Format">
+        <optgroup label="DIN"><option value="a5">A5 · 14,8 × 21 cm</option><option value="a4">A4 · 21 × 29,7 cm</option><option value="a3">A3 · 29,7 × 42 cm</option><option value="a2">A2 · 42 × 59,4 cm</option><option value="a1">A1 · 59,4 × 84,1 cm</option></optgroup>
+        <optgroup label="Poster"><option value="30x40">30 × 40 cm</option><option value="40x50">40 × 50 cm</option><option value="50x70" selected>50 × 70 cm</option><option value="60x90">60 × 90 cm</option><option value="70x100">70 × 100 cm</option></optgroup>
+      </select></div>
   </header>
-  <div class="toolbar">
+  <div class="toolbar" role="toolbar" aria-label="Projekt">
     <button type="button" id="newPoster" class="button">Neu</button>
     <label class="button">Öffnen…<input type="file" id="openProject" accept=".json,application/json" class="visually-hidden"></label>
     <button type="button" id="saveProject" class="button">Sichern…</button>
@@ -82,31 +84,9 @@
       <select id="format" aria-label="Dateiformat"><option value="png">PNG</option><option value="jpeg">JPG</option></select>
     </div>
     <button type="button" id="export" class="primary">Als PNG exportieren</button>
-    <p class="secondary"><span id="exportInfo">5906 × 8268 px</span> · Daten: <a href="https://www.wikidata.org" target="_blank" rel="noopener">Wikidata</a>, <a href="https://www.wikipedia.org" target="_blank" rel="noopener">Wikipedia</a>, <a href="https://rawg.io" target="_blank" rel="noopener">RAWG</a></p>
+    <p class="secondary"><span id="exportInfo">5906 × 8268 px</span> · Daten: <a href="https://www.wikidata.org" target="_blank" rel="noopener">Wikidata</a>, <a href="https://www.wikipedia.org" target="_blank" rel="noopener">Wikipedia</a></p>
   </footer>
 </aside>
-<dialog id="settings" aria-labelledby="settingsTitle">
-  <form id="settingsForm">
-    <h2 id="settingsTitle">Einstellungen</h2>
-    <div class="group">
-      <div class="row"><label for="apiKey">RAWG-Key</label><input id="apiKey" type="password" placeholder="optional" spellcheck="false" autocomplete="off"></div>
-    </div>
-    <p class="footnote" id="keyStatus" aria-live="polite">Wird nur in diesem Browser gespeichert.</p>
-    <p class="footnote">Die Spielesuche nutzt Wikidata und Wikipedia und funktioniert ohne Key. Mit einem RAWG-Key wird zusätzlich RAWG durchsucht: mehr kleine Indie-Spiele und ein Platzhalterbild.</p>
-    <h3>So bekommst du einen RAWG-Key</h3>
-    <ol>
-      <li><a href="https://rawg.io/signup" target="_blank" rel="noopener">rawg.io</a> öffnen und kostenlos registrieren.</li>
-      <li><a href="https://rawg.io/apidocs" target="_blank" rel="noopener">rawg.io/apidocs</a> öffnen und auf „Get API Key“ klicken.</li>
-      <li>Das Formular ausfüllen. Als Website reicht z. B. <code>http://localhost</code>.</li>
-      <li>Den angezeigten Key kopieren, hier einfügen und sichern.</li>
-    </ol>
-    <p class="footnote">Alle Quellen werden bei jeder Suche live abgefragt. Neue Spiele sind sofort auffindbar, ein Aktualisieren ist nicht nötig.</p>
-    <div class="actions">
-      <button type="button" onclick="this.closest('dialog').close()">Abbrechen</button>
-      <button class="default">Sichern</button>
-    </div>
-  </form>
-</dialog>
 <main id="main"><canvas id="preview" role="img" tabindex="0" aria-label="Postervorschau. Pfeiltasten verschieben den Bildausschnitt."></canvas></main>
 
 <!-- build:vendor -->

@@ -2,7 +2,7 @@
 
 Poster-Generator (50 × 70 cm, 300 dpi). Läuft komplett offline: `index.html` per Doppelklick öffnen, kein Server, keine Installation.
 
-- Spielesuche über Wikidata/Wikipedia (ohne Key), optional zusätzlich RAWG (Key im Zahnrad-Menü). Braucht Internet.
+- Spielesuche über Wikidata/Wikipedia, ohne Key (braucht Internet): füllt Titel, Entwickler, Genres, Datum und Beschreibung, lädt das Wikipedia-Cover als Platzhalter und das Logo von Steam bzw. Wikidata.
 - Bildausschnitt: in der Vorschau ziehen, zoomen mit Mausrad oder Regler.
 - **Mit KI hochskalieren**: ESRGAN läuft lokal im Browser (WebGL) und rechnet zu kleine Bilder auf bis zu 300 dpi hoch (max. 4×).
 - Eingaben und Bilder bleiben im Browser gespeichert. **Sichern…** legt ein Projekt als `.poster.json` ab, **Öffnen…** lädt es wieder.
