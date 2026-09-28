@@ -350,7 +350,7 @@ function idb(mode, op) {
   });
 }
 const storeFile = (key, file) => SELFTEST || idb('readwrite', st => file ? st.put(file, STORE + key) : st.delete(STORE + key)).catch(() => {});
-const HINT = { image: 'oder in die Vorschau ziehen', logo: 'optional, PNG mit Transparenz' };
+const HINT = { image: 'oder in die Vorschau ziehen oder mit Strg+V einfügen', logo: 'optional, PNG mit Transparenz' };
 function clearImage(key) {
   state[key] = state.files[key] = null;
   storeFile(key, null);
@@ -367,6 +367,8 @@ function newPoster() {
   clearImage('image');
   clearImage('logo');
   $('games').replaceChildren();
+  $('pics').replaceChildren();
+  $('showPicsRow').hidden = true;
   gameStatus();
   render();
 }
@@ -466,6 +468,11 @@ $('auto').onclick = applyPalette;
 main.ondragover = e => { e.preventDefault(); main.classList.add('drag'); };
 main.ondragleave = () => main.classList.remove('drag');
 main.ondrop = e => { e.preventDefault(); main.classList.remove('drag'); loadImage(e.dataTransfer.files[0], 'image'); };
+// Strg+V: ein in der Bildsuche kopiertes Bild direkt übernehmen (der Browser lädt es dabei selbst, ohne CORS-Grenze)
+document.addEventListener('paste', e => {
+  const f = [...e.clipboardData.items].find(i => i.type.startsWith('image/'))?.getAsFile();
+  if (f) { e.preventDefault(); loadImage(f, 'image'); }
+});
 
 // Spieldaten: Wikidata (Fakten, Logo, Steam-Nummer) + Wikipedia (Beschreibung, Cover). Frei, ohne Key,
 // sehr vollständig bei bekannten Spielen und kennt auch Abkürzungen wie "kotor"
@@ -515,14 +522,19 @@ async function wikidataGame(e, film = false) {
   const dev = claims(e, film ? 'P57' : 'P178')[0]?.id, genres = claims(e, 'P136').map(v => v.id).slice(0, 6), logoFile = claims(e, 'P154')[0];
   const ids = [dev, ...genres].filter(Boolean);
   const [lang, page] = e.sitelinks?.enwiki ? ['en', e.sitelinks.enwiki.title] : e.sitelinks?.dewiki ? ['de', e.sitelinks.dewiki.title] : [];
-  const [names, summary, logo] = await Promise.all([
+  const date = wdDate(e);
+  const [names, summary, logo, apple, ...more] = await Promise.all([
     ids.length ? wd({ action: 'wbgetentities', ids: ids.join('|'), props: 'labels', languages: 'en|mul|de' }).then(r => r.entities) : {},
     page ? fetch(`https://${lang}.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(page)}`).then(r => r.ok ? r.json() : {}, () => ({})) : {},
     // Commons liefert per API direkt eine PNG-Adresse, auch für SVG-Logos (Weiterleitungen dort hätten keine CORS-Freigabe)
     logoFile ? wm('commons.wikimedia.org', { action: 'query', titles: 'File:' + logoFile, prop: 'imageinfo', iiprop: 'url', iiurlwidth: 1200 })
       .then(r => Object.values(r.query.pages)[0]?.imageinfo?.[0]?.thumburl, () => null) : null,
+    // alle Bildquellen gleichzeitig; die Nummern bei Apple, Microsoft und Nintendo sowie die Wikis stehen in Wikidata
+    appleTv('movies', film && claims(e, 'P9586')[0]), fandomArt(claims(e, 'P6262'), wdLabel(e), date?.time.slice(1, 5)),
+    ...film ? [] : [xboxArt(claims(e, 'P5885')[0]), nintendoArt(claims(e, 'P8084')[0], wdLabel(e))],
   ]);
-  const date = wdDate(e), steam = !film && claims(e, 'P1733')[0], minutes = claims(e, 'P2047')[0]; // Dauer in Minuten (Q7727) oder Sekunden
+  const steam = !film && claims(e, 'P1733')[0], minutes = claims(e, 'P2047')[0]; // Dauer in Minuten (Q7727) oder Sekunden
+  const steamImg = f => `https://shared.steamstatic.com/store_item_assets/steam/apps/${steam}/${f}`;
   const fields = gameFields({
     name: wdLabel(e),
     released: date?.precision >= 11 ? date.time.slice(1, 11) : undefined,
@@ -533,13 +545,77 @@ async function wikidataGame(e, film = false) {
     runtime: film && minutes ? Math.round(+minutes.amount / (minutes.unit.endsWith('/Q11574') ? 60 : 1)) + ' Min.' : '',
   });
   if (!fields.year && date) fields.year = date.time.slice(1, 5);
+  const wiki = summary.originalimage; // Wikipedia-Cover, meist nur ~300 px
   return {
     fields,
-    // Cover aus dem Wikipedia-Artikel, meist nur ~300 px: Platzhalter
-    covers: summary.originalimage ? [['Wikipedia-Cover.jpg', summary.originalimage.source]] : [],
-    logos: [steam && ['Steam-Logo.png', `https://shared.steamstatic.com/store_item_assets/steam/apps/${steam}/logo.png`],
-      logo && ['Wikidata-Logo.png', logo]].filter(Boolean), // Steam zuerst: verlässlicher und meist hell für dunkle Poster
+    // Steam-Bilder haben feste Namen, aber nicht jedes Spiel hat jedes; Größe und Vorhandensein misst erst choosePic
+    pics: [...apple.pics, ...more.flat(), ...steam ? ['library_hero_2x.jpg', 'library_hero.jpg', 'library_600x900_2x.jpg', 'page_bg_raw.jpg'].map(f => pic('Steam', steamImg(f))) : [],
+      pic('Wikipedia', wiki?.source, wiki?.width, wiki?.height)].filter(Boolean),
+    // Steam zuerst: verlässlicher und meist hell für dunkle Poster; Apple-TV-Logos sind hochauflösende, transparente PNGs
+    logos: [['AppleTV-Logo.png', apple.logo], ['Steam-Logo.png', steam && steamImg('logo.png')], ['Wikidata-Logo.png', logo]].filter(l => l[1]),
   };
+}
+
+// Bild zur Auswahl: Quelle, Original, Größe (0 = unbekannt, misst choosePic beim Laden) und Vorschau (~400 px breit, sonst das Original)
+const pic = (src, url, w = 0, h = 0, thumb = url) => url ? { src, url, w, h, thumb } : null;
+
+// Apple TV (Wikidata P9586 Film, P9751 Serie): Szenenbilder ohne Schrift bis 4320 × 3240, Plakate 2000 × 3000, Logo als transparentes PNG.
+// Die Suche dort findet fast nur Apple-Eigenproduktionen, daher der Weg über die Wikidata-Nummer.
+// (iTunes hätte dasselbe Plakat, sendet CORS aber nur sporadisch und kennt kaum Filme ohne Apple-TV-Nummer.)
+// ponytail: utsk ist das öffentliche Token der Web-App tv.apple.com, kein Konto-Key; ändert Apple es, greifen TVmaze, Fandom und Wikipedia
+const UTS = 'caller=web&sf=143441&v=90&pfm=web&locale=en-US&utscf=OjAAAAAAAAA~&utsk=6e3013c6d6fae3c2%3A%3A%3A%3A%3A%3A235656c069bb0efb';
+const APPLE_ART = /^(contentImage(16X9|Tall)?|posterArt|coverArt(16X9)?|previewArtwork|extrasArtwork)$/;
+async function appleTv(kind, id) {
+  try {
+    const d = id && (await (await fetch(`https://uts-api.itunes.apple.com/uts/v3/${kind}/${id}?${UTS}`)).json()).data;
+    // Die Bilder des Titels stecken verstreut in content (eigene, Trailer) und playables (Fassungen anderer Anbieter, oft mit anderem Plakat);
+    // canvas zeigt ähnliche Titel und bleibt draußen, ebenso Porträts der Besetzung
+    const found = [], walk = (o, key) => o && typeof o === 'object' && (APPLE_ART.test(key) && o.url?.includes('{w}') ? found.push(o)
+      : Object.entries(o).forEach(([k, v]) => walk(v, Array.isArray(o) ? key : k)));
+    walk([d?.content, d?.playables], '');
+    const url = (i, w, h, f = 'jpg') => i.url.replace('{w}', w).replace('{h}', h).replace('{f}', f), logo = d?.content?.images?.contentLogo;
+    return { pics: found.map(i => pic('Apple TV', url(i, i.width, i.height), i.width, i.height, url(i, 400, Math.round(400 * i.height / i.width)))),
+      logo: logo && url(logo, logo.width, logo.height, 'png') };
+  } catch { return { pics: [] }; }
+}
+// Microsoft Store (P5885): Key Art ohne Schrift 3840 × 2160, Cover 2160 × 2160, Plakat, Screenshots in 4K; erlaubt auch file:// (Origin null)
+async function xboxArt(id) {
+  try {
+    const r = id && await (await fetch('https://displaycatalog.mp.microsoft.com/v7.0/products?' + new URLSearchParams({ bigIds: id.toUpperCase(), market: 'US', languages: 'en-us' }))).json();
+    let shots = 0; // höchstens 4 Screenshots, sonst verdrängen sie Key Art und Cover aus den besten 10
+    return (r?.Products?.[0]?.LocalizedProperties?.[0]?.Images || []).filter(i => !/Logo|Icon|Tile/i.test(i.ImagePurpose) && (i.ImagePurpose !== 'Screenshot' || shots++ < 4))
+      .map(i => { const u = i.Uri.replace(/^\/\//, 'https://'); return pic('Microsoft Store', u, i.Width, i.Height, u + '?w=400'); });
+  } catch { return []; }
+}
+// Nintendo eShop (P8084): Key Art 1920 × 1080 und Screenshots aus der Suche von nintendo.com (Algolia); gesucht wird der Titel, genommen nur der
+// Treffer mit der eShop-Nummer. Schlüssel als URL-Parameter und text/plain, damit der Browser keine Vorab-Anfrage (Preflight) schickt.
+// ponytail: öffentlicher Such-Schlüssel der Webseite nintendo.com, kein Konto-Key; ändert Nintendo ihn, greifen die übrigen Quellen
+async function nintendoArt(id, name) {
+  try {
+    const r = id && await (await fetch('https://U3B6GR4UA3-dsn.algolia.net/1/indexes/store_game_en_us/query?x-algolia-application-id=U3B6GR4UA3&x-algolia-api-key=a29c6927638bfd8cee23993e51e721c9',
+      { method: 'POST', body: JSON.stringify({ query: name, hitsPerPage: 20 }) })).json();
+    const h = r?.hits?.find(h => h.urlKey === id), cdn = 'https://assets.nintendo.com/image/upload/';
+    return (h ? [h.productImage, ...(h.productGallery || []).filter(g => g.resourceType === 'image').map(g => g.publicId)] : [])
+      .filter(Boolean).map(p => p.replace(/^\//, '')).map(p => pic('Nintendo', cdn + p, 0, 0, cdn + 'w_400/' + p));
+  } catch { return []; }
+}
+// Fandom-Wikis: alle großen Bilder der Seite, Box Art oft in Originalgröße; bei älteren Spielen die einzige große Quelle.
+// Gefragt werden die Wikis aus Wikidata (P6262, "wiki:Seite") und die aus dem Titel geratene ("Need for Speed: Most Wanted" → needforspeed.fandom.com,
+// Fandom leitet auf nfs.fandom.com weiter), dort die Seite "Titel (Jahr)", sonst "Titel". Wikidata-Wikis nur, wenn ihr Name im Titel steckt:
+// allgemeine Wikis (Magazine, Gamicus) liefern sonst fremde Bilder, etwa ein Heftcover. Flaggen, Symbole, Logos und Karten sind keine Posterbilder
+async function fandomArt(pages, name, year) {
+  const t = fold(name).join(''), guess = fold(name.split(':')[0]).join('');
+  const wikis = pages.map(p => p.split(':')).filter(([wiki]) => /^[a-z0-9]+$/.test(wiki) && t.includes(wiki)).map(([wiki, ...page]) => [wiki, [page.join(':')]]);
+  if (guess && !wikis.some(([wiki]) => wiki === guess)) wikis.push([guess, year ? [`${name} (${year})`, name] : [name]]);
+  const images = async (wiki, title) => Object.values((await (await fetch(`https://${wiki}.fandom.com/api.php?` + new URLSearchParams({ action: 'query',
+    titles: title, generator: 'images', gimlimit: 100, prop: 'imageinfo', iiprop: 'url|size|mime', redirects: 1, format: 'json', origin: '*' }))).json()).query?.pages || {});
+  const lists = await Promise.all(wikis.map(async ([wiki, titles]) => { // erste Seite mit Bildern gewinnt; unbekannte Wiki → keine JSON-Antwort → leer
+    try { for (const title of titles) { const l = await images(wiki, title); if (l.length) return l; } } catch {}
+    return [];
+  }));
+  return lists.flat().map(p => [p.title, p.imageinfo?.[0]])
+    .filter(([title, i]) => /^image\/(jpeg|png|webp)$/.test(i?.mime) && Math.min(i.width, i.height) >= 600 && !/flag|icon|logo|map|sprite|signature/i.test(title))
+    .map(([, i]) => pic('Fandom', i.url, i.width, i.height, i.url.replace('/revision/latest', '/revision/latest/scale-to-width-down/400')));
 }
 
 // Albumdaten: MusicBrainz (Titel, Künstler, Label, Genres, Titelliste) + Cover Art Archive. Frei, ohne Key.
@@ -628,37 +704,94 @@ async function tvmaze(path) {
 }
 const htmlText = html => new DOMParser().parseFromString((html || '').replace(/<\/p>/gi, '\n'), 'text/html').body.textContent;
 async function tvmazeSearch(q) {
-  return (await tvmaze('search/shows?' + new URLSearchParams({ q }))).map(({ show: s }) => ({ name: s.name, load: () => tvmazeShow(s.id),
+  return (await tvmaze('search/shows?' + new URLSearchParams({ q }))).map(({ show: s }) => ({ name: s.name, load: () => tvmazeShow(s.id, s.name, s.premiered?.slice(0, 4)),
     info: [s.premiered?.slice(0, 4), (s.network || s.webChannel)?.name].filter(Boolean).join(' · ') }));
 }
-async function tvmazeShow(id) {
-  const [s, images] = await Promise.all([tvmaze(`shows/${id}?embed=seasons`), tvmaze(`shows/${id}/images`)]);
+async function tvmazeShow(id, name = '', year = '') {
+  const [s, images, more] = await Promise.all([tvmaze(`shows/${id}?embed=seasons`), tvmaze(`shows/${id}/images`),
+    // Apple TV und Fandom über Wikidata: Eintrag mit dieser TVmaze-Nummer (P8600) → Apple-TV-Nummer (P9751), Wikis (P6262)
+    wd({ action: 'query', list: 'search', srsearch: 'haswbstatement:P8600=' + id, srlimit: 1 }).then(async r => {
+      const q = r.query.search[0]?.title, e = q && (await wd({ action: 'wbgetentities', ids: q, props: 'claims|labels', languages: 'en|mul|de' })).entities[q];
+      const [apple, fandom] = await Promise.all([appleTv('shows', claims(e, 'P9751')[0]), fandomArt(claims(e, 'P6262'), wdLabel(e) || name, year)]);
+      return { pics: [...apple.pics, ...fandom], logo: apple.logo };
+    }).catch(() => ({ pics: [] }))]);
   const seasons = (s._embedded?.seasons || []).filter(x => x.premiereDate).length; // angekündigte Staffeln ohne Start zählen nicht
-  // größtes Bild je Art; Szenenbild (ohne Schriftzug) zuerst, es passt besser ins Posterfeld als das Plakat mit Titel
-  const best = type => images.filter(i => i.type === type).map(i => i.resolutions?.original).filter(Boolean)
-    .sort((a, b) => b.width * b.height - a.width * a.height)[0]?.url;
+  // alle Bilder von TVmaze (Szenenbilder, Plakate, Banner) in Originalgröße, Vorschau in mittlerer Größe
+  const tv = images.map(i => i.resolutions?.original && pic('TVmaze', i.resolutions.original.url, i.resolutions.original.width, i.resolutions.original.height,
+    i.resolutions.medium?.url || i.resolutions.original.url));
   return {
     fields: gameFields({ name: s.name, released: s.premiered, developer: (s.network || s.webChannel)?.name, genres: s.genres,
       description: htmlText(s.summary), website: s.officialSite, runtime: seasons ? String(seasons) : '' }),
-    covers: [['TVmaze-Hintergrund.jpg', best('background')], ['TVmaze-Poster.jpg', best('poster') || s.image?.original]].filter(c => c[1]),
-    logos: [], // TVmaze hat keine Logos; leere Liste räumt ein automatisch geladenes Logo vom vorigen Treffer weg
+    pics: [...more.pics, ...tv, !images.length && pic('TVmaze', s.image?.original)].filter(Boolean),
+    // TVmaze hat keine Logos; eine leere Liste räumt ein automatisch geladenes Logo vom vorigen Treffer weg
+    logos: [['AppleTV-Logo.png', more.logo]].filter(l => l[1]),
   };
 }
 
 async function applyGame(load) {
   gameStatus('Wird geladen…');
   try {
-    const { fields, covers, logos } = await load();
+    const { fields, covers, pics, logos } = await load();
     Object.entries(fields).forEach(([k, v]) => $(k).value = v);
-    await Promise.all([autoImage('image', covers), logos && autoImage('logo', logos)]);
-    gameStatus();
+    // Alben: das eine Cover direkt; Spiele, Filme, Serien: Auswahl aus allen gefundenen Bildern
+    await Promise.all([pics ? choosePic(pics) : autoImage('image', covers), logos && autoImage('logo', logos)]);
+    const img = state.image, small = pics && (!img || Math.min(img.width, img.height) < 1000);
+    gameStatus(small ? 'Nur kleine Bilder gefunden. Unten suchen und mit Strg+V einfügen oder mit KI hochskalieren.' : '');
     render();
   } catch (err) { gameStatus(errText(err)); }
 }
-// Automatisch geladene Bilder ersetzen sich beim nächsten Treffer, eigene Uploads bleiben. sources: [[Name, URL], …], erste ladbare gewinnt
-const AUTO = new Set(['Wikipedia-Cover.jpg', 'Steam-Logo.png', 'Wikidata-Logo.png', 'Album-Cover.jpg', 'TVmaze-Hintergrund.jpg', 'TVmaze-Poster.jpg']);
+
+// Bildauswahl: unbekannte Größen durch Laden messen (dabei fallen fehlende Bilder heraus), die 10 besten im Dialog zeigen und das beste gleich
+// übernehmen, damit kein Bild vom vorigen Treffer stehen bleibt. Maßstab ist die kürzere Seite: das Posterfeld ist fast quadratisch,
+// sie bestimmt die nutzbare Auflösung; bei Gleichstand zählt die Pixelzahl
+const picName = p => `${p.src} · ${p.w} × ${p.h}`;
+const measure = p => p.w ? p : fetch(p.url).then(r => r.ok ? r.blob() : null).then(b => b && createImageBitmap(b))
+  .then(b => b && { ...p, w: b.width, h: b.height }, () => null);
+let picSeq = 0;
+async function choosePic(list) {
+  const seq = ++picSeq, seen = new Set();
+  $('pics').replaceChildren();
+  $('showPicsRow').hidden = true;
+  const rank = (a, b) => Math.min(b.w, b.h) - Math.min(a.w, a.h) || b.w * b.h - a.w * a.h, n = {};
+  const all = (await Promise.all(list.filter(p => !seen.has(p.url) && seen.add(p.url)).map(measure))).filter(Boolean).sort(rank);
+  // höchstens 4 je Quelle, damit jede vorkommt (sonst füllen z. B. Fandom-Bilder alles); freie Plätze bekommen die übrigen
+  const best = [...new Set([...all.filter(p => (n[p.src] = (n[p.src] || 0) + 1) <= 4), ...all])].slice(0, 10).sort(rank);
+  if (seq !== picSeq) return; // inzwischen anderer Treffer gewählt
+  $('pics').replaceChildren(...best.map(p => {
+    const b = Object.assign(document.createElement('button'), { type: 'button', className: 'pic' });
+    b.dataset.name = picName(p);
+    b.append(Object.assign(document.createElement('img'), { src: p.thumb, alt: '', loading: 'lazy' }),
+      Object.assign(document.createElement('strong'), { textContent: `${p.w} × ${p.h}` }), Object.assign(document.createElement('span'), { textContent: p.src }));
+    b.onclick = async () => {
+      $('pickerStatus').textContent = 'Wird geladen…';
+      try {
+        const r = await fetch(p.url), blob = r.ok && await r.blob();
+        if (!blob?.type.startsWith('image/')) throw new Error();
+        await loadImage(new File([blob], picName(p), { type: blob.type }), 'image');
+        $('picker').close();
+      } catch { $('pickerStatus').textContent = 'Dieses Bild konnte nicht geladen werden.'; }
+    };
+    return b;
+  }));
+  $('showPicsRow').hidden = !best.length;
+  $('picsInfo').textContent = best.length ? `${best.length} Bilder, das größte ${best[0].w} × ${best[0].h}` : '';
+  await autoImage('image', best.map(p => [picName(p), p.url]));
+  if (best.length > 1) showPicker();
+}
+function showPicker() { // aktuelles Bild markieren
+  for (const b of $('pics').children) b.setAttribute('aria-pressed', b.dataset.name === $('imageName').textContent);
+  $('pickerStatus').textContent = 'Sortiert nach nutzbarer Auflösung. Ein Klick übernimmt das Bild.';
+  if (!$('picker').open) $('picker').showModal();
+}
+$('showPics').onclick = showPicker;
+$('pickerClose').onclick = () => $('picker').close();
+
+// Automatisch geladene Bilder ersetzen sich beim nächsten Treffer, eigene Uploads bleiben. sources: [[Name, URL], …], erste ladbare gewinnt.
+// Bilder aus der Auswahl heißen "Quelle · B × H"
+const AUTO = new Set(['Wikipedia-Cover.jpg', 'Steam-Logo.png', 'Wikidata-Logo.png', 'Album-Cover.jpg', 'TVmaze-Hintergrund.jpg', 'TVmaze-Poster.jpg', 'AppleTV-Logo.png']);
+const isAuto = name => AUTO.has(name) || / · \d+ × \d+$/.test(name);
 async function autoImage(key, sources) {
-  if (state[key] && !AUTO.has($(key + 'Name').textContent)) return;
+  if (state[key] && !isAuto($(key + 'Name').textContent)) return;
   clearImage(key);
   for (const [name, url] of sources) {
     try {
@@ -865,19 +998,38 @@ if (location.hash === '#selftest') (async () => {
 
     // Wikidata/Wikipedia/Commons simulieren: Treffer trotz Doppelpunkt, alle Felder, Cover, Logo-Rückfall Steam → Wikidata
     const realFetch = window.fetch, v = value => ({ mainsnak: { datavalue: { value } } });
-    const tinyPng = await new OffscreenCanvas(4, 4).convertToBlob();
+    const tinyPng = await new OffscreenCanvas(4, 4).convertToBlob(), fandomHosts = [];
     const fake = {
       Q1: { id: 'Q1', labels: { en: { value: 'Need for Speed: Most Wanted' } }, sitelinks: { enwiki: { title: 'Need for Speed: Most Wanted (2012 video game)' } },
         claims: { P577: [v({ time: '+2012-00-00T00:00:00Z', precision: 9 }), v({ time: '+2012-10-30T00:00:00Z', precision: 11 })], P178: [v({ id: 'Q2' })],
-          P136: [v({ id: 'Q3' }), v({ id: 'Q4' })], P856: [v('https://www.ea.com/nfs')], P1733: [v('1262560')], P154: [v('NFS Logo.svg')] } },
+          P136: [v({ id: 'Q3' }), v({ id: 'Q4' })], P856: [v('https://www.ea.com/nfs')], P1733: [v('1262560')], P154: [v('NFS Logo.svg')], P5885: [v('9nfsmw')],
+          P8084: [v('nfs-mw-switch')], P6262: [v('magazinesfromthepast:NFS_MW'), v('needforspeed:Most_Wanted')] } },
       Q2: { labels: { mul: { value: 'Criterion Games' } } }, Q3: { labels: { en: { value: 'racing video game' } } }, Q4: { labels: { en: { value: 'open world' } } },
     };
     window.fetch = async url => {
       const u = new URL(url), json = o => new Response(JSON.stringify(o));
-      if (u.hostname.endsWith('wikipedia.org')) return json({ extract: 'Need for Speed: Most Wanted is a 2012 racing game.\nZweiter Absatz.', originalimage: { source: 'https://upload.wikimedia.org/cover.jpg' } });
+      if (u.hostname.endsWith('wikipedia.org')) return json({ extract: 'Need for Speed: Most Wanted is a 2012 racing game.\nZweiter Absatz.',
+        originalimage: { source: 'https://upload.wikimedia.org/cover.jpg', width: 300, height: 400 } });
       if (u.hostname === 'commons.wikimedia.org') return json({ query: { pages: { 1: { imageinfo: [{ thumburl: 'https://upload.wikimedia.org/logo.png' }] } } } });
       if (u.hostname === 'upload.wikimedia.org') return new Response(tinyPng);
-      if (u.hostname.includes('steamstatic')) return new Response('', { status: 404 }); // kein Steam-Logo → Wikidata-Logo
+      // Steam, Nintendo: Größe unbekannt, beim Messen 404 → fallen heraus; große Bilder von Xbox/Fandom 404 → Wikipedia wird geladen
+      if (/steamstatic|store-images|assets\.nintendo|wikia/.test(u.hostname)) return new Response('', { status: 404 });
+      if (u.hostname.endsWith('algolia.net')) return json({ hits: [{ urlKey: 'nfs-mw-switch-2', productImage: 'store/falsch' },
+        { urlKey: 'nfs-mw-switch', productImage: 'store/nfs', productGallery: [{ publicId: '/store/shot', resourceType: 'image' }, { publicId: '/store/video', resourceType: 'video' }] }] });
+      // Fandom: nur die Wiki, deren Name im Titel steht; Flaggen, SVGs und kleine Bilder fallen heraus
+      if (u.hostname.endsWith('fandom.com')) {
+        fandomHosts.push(u.hostname + ' ' + u.searchParams.get('titles'));
+        if (u.searchParams.get('titles').endsWith('(2012)')) return json({ batchcomplete: '' }); // Seite fehlt
+        const f = (title, url, width, height, mime = 'image/jpeg') => ({ title, imageinfo: [{ url, width, height, mime }] });
+        return json({ query: { pages: { 1: f('File:Box.jpg', 'https://static.wikia.nocookie.net/nfs/images/box.jpg/revision/latest?cb=1', 1500, 2100),
+          2: f('File:Flag of USA.png', 'https://static.wikia.nocookie.net/flag.png', 2000, 1333, 'image/png'), 3: f('File:Klein.jpg', 'https://x/klein.jpg', 500, 400),
+          4: f('File:Karte.svg', 'https://x/karte.svg', 3000, 3000, 'image/svg+xml') } } });
+      }
+      if (u.hostname.startsWith('displaycatalog')) return json(u.searchParams.get('bigIds') !== '9NFSMW' ? {} : { Products: [{ LocalizedProperties: [{ Images: [
+        ...Array.from({ length: 6 }, (_, i) => ({ ImagePurpose: 'Screenshot', Uri: '//store-images.s-microsoft.com/shot' + i, Width: 3840, Height: 2160 })),
+        { ImagePurpose: 'SuperHeroArt', Uri: '//store-images.s-microsoft.com/hero', Width: 3840, Height: 2160 },
+        { ImagePurpose: 'BoxArt', Uri: '//store-images.s-microsoft.com/box', Width: 2160, Height: 2160 },
+        { ImagePurpose: 'Logo', Uri: '//store-images.s-microsoft.com/logo', Width: 300, Height: 300 }] }] }] });
       if (u.searchParams.get('list') === 'search') return json({ query: { search: [{ title: 'Q1' }] } });
       return json({ entities: Object.fromEntries(u.searchParams.get('ids').split('|').map(id => [id, fake[id]])) });
     };
@@ -888,10 +1040,32 @@ if (location.hash === '#selftest') (async () => {
       ok(w.fields.title === 'Need for Speed:' && w.fields.subtitle === 'Most Wanted' && w.fields.company === 'Criterion Games'
         && w.fields.genres === 'Racing\nOpen World' && w.fields.year === '2012' && w.fields.day === 'Oct 30'
         && w.fields.desc === 'Need for Speed: Most Wanted is a 2012 racing game.' && w.fields.website === 'https://www.ea.com/nfs', 'Wikidata-Felder');
-      ok(w.covers[0][1] === 'https://upload.wikimedia.org/cover.jpg' && w.logos.map(l => l[0]).join() === 'Steam-Logo.png,Wikidata-Logo.png'
-        && w.logos[0][1].includes('/1262560/') && w.logos[1][1] === 'https://upload.wikimedia.org/logo.png', 'Cover und Logo-Quellen');
+      const count = src => w.pics.filter(p => p.src === src).length;
+      ok(count('Microsoft Store') === 6 && count('Nintendo') === 2 && count('Steam') === 4 && count('Fandom') === 1 && count('Wikipedia') === 1 && w.pics.length === 14
+        && w.pics.find(p => p.url.endsWith('/hero')).w === 3840 && w.pics.find(p => p.src === 'Nintendo').url === 'https://assets.nintendo.com/image/upload/store/nfs'
+        && w.pics.some(p => p.url === 'https://assets.nintendo.com/image/upload/store/shot' && p.thumb.includes('/w_400/store/shot'))
+        && w.pics.find(p => p.src === 'Fandom').thumb.includes('/revision/latest/scale-to-width-down/400?cb=1')
+        && w.pics.find(p => p.url.includes('library_hero_2x')).w === 0 && fandomHosts.join() === 'needforspeed.fandom.com Most_Wanted',
+        'Bildquellen: alle Quellen, 4 Screenshots, Fandom gefiltert');
+      const guessed = await fandomArt([], 'Need for Speed: Most Wanted', '2012');
+      ok(fandomHosts.slice(1).join('|') === 'needforspeed.fandom.com Need for Speed: Most Wanted (2012)|needforspeed.fandom.com Need for Speed: Most Wanted'
+        && guessed.length === 1, 'Fandom: Wiki aus dem Titel geraten, Seite mit Jahr, sonst ohne');
+      ok(w.logos.map(l => l[0]).join() === 'Steam-Logo.png,Wikidata-Logo.png'
+        && w.logos[0][1].includes('/1262560/') && w.logos[1][1] === 'https://upload.wikimedia.org/logo.png', 'Logo-Quellen');
       await applyGame(() => wikidataGame(fake.Q1));
-      ok($('imageName').textContent === 'Wikipedia-Cover.jpg' && $('logoName').textContent === 'Wikidata-Logo.png' && state.logo, 'Logo-Rückfall auf Wikidata');
+      ok($('logoName').textContent === 'Wikidata-Logo.png' && state.logo, 'Logo-Rückfall auf Wikidata');
+      // Auswahl: Steam/Nintendo fehlen (404 beim Messen), Rest nach kürzerer Seite; die großen laden nicht (404), also wird Wikipedia übernommen
+      const shown = [...$('pics').children].map(b => b.dataset.name);
+      ok(shown.length === 8 && shown.slice(0, 5).every(n => n === 'Microsoft Store · 3840 × 2160') && shown[5] === 'Microsoft Store · 2160 × 2160'
+        && shown[6] === 'Fandom · 1500 × 2100' && shown[7] === 'Wikipedia · 300 × 400' && $('picker').open && !$('showPicsRow').hidden, 'Bildauswahl sortiert');
+      ok($('imageName').textContent === 'Wikipedia · 300 × 400' && $('pics').lastChild.getAttribute('aria-pressed') === 'true'
+        && $('gameStatus').textContent.includes('Strg+V'), 'bestes ladbares Bild übernommen, Hinweis bei kleinem Bild');
+      $('pics').firstChild.click(); // lädt nicht (404) → Meldung, Dialog bleibt offen
+      for (let i = 0; i < 20 && !$('pickerStatus').textContent.includes('nicht'); i++) await new Promise(r => setTimeout(r, 50));
+      ok($('picker').open && $('imageName').textContent === 'Wikipedia · 300 × 400', 'Fehler beim Wählen');
+      $('pics').lastChild.click();
+      for (let i = 0; i < 20 && $('picker').open; i++) await new Promise(r => setTimeout(r, 50));
+      ok(!$('picker').open, 'Wählen schließt den Dialog');
       state.files.logo = new File([tinyPng], 'mein-logo.png'); $('logoName').textContent = 'mein-logo.png'; // eigener Upload bleibt
       await autoImage('logo', w.logos);
       ok($('logoName').textContent === 'mein-logo.png', 'eigenes Logo bleibt');
@@ -1036,18 +1210,27 @@ if (location.hash === '#selftest') (async () => {
       _embedded: { seasons: [{ premiereDate: '2008-01-20' }, { premiereDate: '2009-03-08' }, { premiereDate: null }] } };
     const tvImages = [{ type: 'poster', resolutions: { original: { url: 'https://tv/poster.jpg', width: 680, height: 1000 } } },
       { type: 'background', resolutions: { original: { url: 'https://tv/klein.jpg', width: 1280, height: 720 } } },
-      { type: 'background', resolutions: { original: { url: 'https://tv/gross.jpg', width: 1920, height: 1080 } } }];
+      { type: 'background', resolutions: { original: { url: 'https://tv/gross.jpg', width: 1920, height: 1080 }, medium: { url: 'https://tv/gross-m.jpg' } } }];
     const film = id => ({ id, labels: { en: { value: id === 'F1' ? 'Toy Story' : 'Toy Story 4' } }, sitelinks: id === 'F1' ? { enwiki: { title: 'Toy Story' }, dewiki: {} } : { enwiki: { title: 'Toy Story 4' } },
       claims: { P577: [v({ time: id === 'F1' ? '+1995-11-22T00:00:00Z' : '+2019-06-21T00:00:00Z', precision: 11 })], P57: [v({ id: 'D1' })], P136: [v({ id: 'G1' })],
-        P2047: [v({ amount: '+81', unit: 'http://www.wikidata.org/entity/Q7727' })], P1733: [v('123')] } });
+        P2047: [v({ amount: '+81', unit: 'http://www.wikidata.org/entity/Q7727' })], P1733: [v('123')], ...id === 'F1' && { P9586: [v('umc.cmc.ts')] } } });
+    // Apple TV: Bildadressen mit Platzhaltern {w}x{h}.{f}
+    const appleImg = (name, width, height) => ({ url: `https://mz/${name}/{w}x{h}sr.{f}`, width, height });
+    // Bilder stecken verstreut: eigene, Trailer, andere Anbieter (playables); Porträts und ähnliche Titel (canvas) gehören nicht dazu
+    const appleData = { content: { images: { contentImage: appleImg('art', 4320, 3240), posterArt: appleImg('poster', 2000, 3000), contentLogo: appleImg('logo', 4317, 461) },
+        backgroundVideo: { images: { contentImage: appleImg('trailer', 3840, 1598) } }, rolesSummary: { cast: [{ images: { headshot: appleImg('kopf', 1000, 1000) } }] } },
+      playables: { x: { images: { coverArt: appleImg('anbieter', 2000, 3000) } } }, canvas: { items: [{ images: { posterArt: appleImg('anderer', 2000, 3000) } }] } };
     const urls = [];
     window.fetch = async url => {
       const u = new URL(url), json = o => new Response(JSON.stringify(o));
       urls.push(u);
       if (u.hostname === 'api.tvmaze.com') return json(u.pathname.includes('search') ? [{ show: tvShow }] : u.pathname.endsWith('/images') ? tvImages : tvShow);
       if (u.hostname.endsWith('wikipedia.org')) return json({ extract: 'Toy Story is a 1995 film.', originalimage: { source: 'https://upload.wikimedia.org/ts.jpg' } });
+      if (u.hostname === 'uts-api.itunes.apple.com') return json(/\/(movies\/umc\.cmc\.ts|shows\/umc\.cmc\.bb)$/.test(u.pathname) && u.searchParams.get('utsk') ? { data: appleData } : {});
+      if (u.searchParams.get('srsearch') === 'haswbstatement:P8600=169') return json({ query: { search: [{ title: 'S1' }] } });
       if (u.searchParams.get('list') === 'search') return json({ query: { search: [{ title: 'F4' }, { title: 'F1' }] } });
-      const ents = { F1: film('F1'), F4: film('F4'), D1: { labels: { en: { value: 'John Lasseter' } } }, G1: { labels: { en: { value: 'animated film' } } } };
+      const ents = { F1: film('F1'), F4: film('F4'), D1: { labels: { en: { value: 'John Lasseter' } } }, G1: { labels: { en: { value: 'animated film' } } },
+        S1: { claims: { P9751: [v('umc.cmc.bb')] } } };
       return json({ entities: Object.fromEntries(u.searchParams.get('ids').split('|').map(id => [id, ents[id]])) });
     };
     document.body.dataset.mode = 'film';
@@ -1057,14 +1240,22 @@ if (location.hash === '#selftest') (async () => {
         && urls.find(u => u.searchParams.get('list') === 'search').searchParams.get('srsearch').includes('P31=Q20650540'), 'Filmsuche: bekanntester zuerst');
       const f = await wikidataGame(film('F1'), true);
       ok(f.fields.company === 'John Lasseter' && f.fields.runtime === '81 Min.' && f.fields.genres === 'Animated' && f.fields.day === 'Nov 22'
-        && !f.logos.length && f.covers[0][1] === 'https://upload.wikimedia.org/ts.jpg', 'Filmfelder (Regie, Laufzeit, kein Steam-Logo)');
+        && f.logos.map(l => l[0]).join() === 'AppleTV-Logo.png', 'Filmfelder (Regie, Laufzeit, kein Steam-Logo)');
+      ok(f.pics.map(p => `${p.src} ${p.url} ${p.w}`).join() === 'Apple TV https://mz/art/4320x3240sr.jpg 4320,Apple TV https://mz/poster/2000x3000sr.jpg 2000,'
+        + 'Apple TV https://mz/trailer/3840x1598sr.jpg 3840,Apple TV https://mz/anbieter/2000x3000sr.jpg 2000,Wikipedia https://upload.wikimedia.org/ts.jpg 0'
+        && f.pics[0].thumb === 'https://mz/art/400x300sr.jpg' && f.logos[0][1] === 'https://mz/logo/4317x461sr.png', 'Film: alle Apple-TV-Bilder in Originalgröße');
+      const f4 = await wikidataGame(film('F4'), true); // ohne Apple-TV-Nummer: nur Wikipedia
+      ok(f4.pics.map(p => p.url).join() === 'https://upload.wikimedia.org/ts.jpg' && !f4.logos.length, 'Film ohne Apple TV');
       $('kindSeries').checked = true;
       await searchGames('breaking bad');
       ok($('games').textContent === 'Breaking Bad2008 · AMC', 'TVmaze-Suche');
       const t = await tvmazeShow(169);
       ok(t.fields.title === 'Breaking Bad' && t.fields.company === 'AMC' && t.fields.runtime === '2' && t.fields.genres === 'Drama\nCrime'
         && t.fields.desc === 'Breaking Bad follows a teacher.' && t.fields.year === '2008' && t.fields.day === 'Jan 20'
-        && t.covers.map(c => c[1]).join() === 'https://tv/gross.jpg,https://tv/poster.jpg' && Array.isArray(t.logos) && !t.logos.length, 'Seriendaten, Szenenbild vor Plakat');
+        && t.pics.map(p => p.url.split('/').at(-2) + '/' + p.w).join() === 'art/4320,poster/2000,trailer/3840,anbieter/2000,tv/680,tv/1280,tv/1920'
+        && t.pics.at(-1).thumb === 'https://tv/gross-m.jpg' && t.logos.map(l => l[0]).join() === 'AppleTV-Logo.png', 'Seriendaten, Apple TV über Wikidata, alle TVmaze-Bilder');
+      const t2 = await tvmazeShow(170);
+      ok(t2.pics.map(p => p.src).join() === 'TVmaze,TVmaze,TVmaze' && Array.isArray(t2.logos) && !t2.logos.length, 'Serie ohne Apple TV (kein Wikidata-Treffer)');
       Object.entries(t.fields).forEach(([k, x]) => $(k).value = x);
       ok(plan(ctx, format(), 1).meta.map(m => m.label).join() === 'Sender,Genres,Staffeln', 'Meta-Zeilen Serie');
       $('kindFilm').checked = true;

@@ -94,7 +94,8 @@
 
     <h2>Bild</h2>
     <div class="group">
-      <label class="file"><input type="file" id="image" accept="image/*" class="visually-hidden"><span class="button">Bild auswählen…</span><span id="imageName">oder in die Vorschau ziehen</span></label>
+      <label class="file"><input type="file" id="image" accept="image/*" class="visually-hidden"><span class="button">Bild auswählen…</span><span id="imageName">oder in die Vorschau ziehen oder mit Strg+V einfügen</span></label>
+      <div class="file" id="showPicsRow" data-only="game film" hidden><button type="button" id="showPics" class="button">Gefundene Bilder…</button><span id="picsInfo"></span></div>
       <div class="row stack"><span id="searchLabel">Suchen in</span><div class="links" role="group" aria-labelledby="searchLabel">
         <a class="button" data-search="presskit" data-only="game" href="#" target="_blank" rel="noopener" title="Offizielles Artwork der Studios, meist höchste Qualität">Presskit ↗</a>
         <a class="button" data-search="tmdb" data-only="film" href="#" target="_blank" rel="noopener" title="The Movie Database: Plakate und Szenenbilder in hoher Auflösung">TMDB ↗</a>
@@ -167,6 +168,11 @@
       <span data-only="album"><a href="https://musicbrainz.org" target="_blank" rel="noopener">MusicBrainz</a>, <a href="https://coverartarchive.org" target="_blank" rel="noopener">Cover Art Archive</a></span></p>
   </footer>
 </aside>
+<dialog id="picker" aria-labelledby="pickerTitle" aria-describedby="pickerStatus">
+  <header><h2 id="pickerTitle">Bild wählen</h2><button type="button" id="pickerClose">Fertig</button></header>
+  <p class="footnote" id="pickerStatus" aria-live="polite"></p>
+  <div class="pics" id="pics" role="group" aria-labelledby="pickerTitle"></div>
+</dialog>
 <main id="main"><canvas id="preview" role="img" tabindex="0" aria-label="Postervorschau. Pfeiltasten verschieben den Bildausschnitt."></canvas></main>
 
 <!-- build:vendor -->

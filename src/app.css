@@ -93,6 +93,7 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
 .footnote { color: var(--secondary); font-size: 11px; margin: 6px 8px 0; }
 .footnote.warn { color: var(--warn); }
 .visually-hidden { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
+[hidden] { display: none !important; } /* sonst gewinnt z. B. display: flex von .file */
 
 /* Kapsel-Buttons */
 button, .button {
@@ -180,9 +181,26 @@ main.drag::after { content: "Bild hier ablegen"; position: absolute; inset: 20px
 #preview.dragging { cursor: grabbing; }
 #preview:focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 50%, transparent); outline-offset: 6px; }
 
+/* Bildauswahl: Glas-Dialog mit Raster aus Vorschaubildern, Auflösung und Quelle darunter */
+dialog { width: min(960px, calc(100vw - 32px)); max-height: calc(100vh - 32px); padding: 16px 20px 20px; border-radius: 26px;
+  color: var(--label); background: var(--glass); border: 1px solid var(--glass-edge);
+  -webkit-backdrop-filter: blur(40px) saturate(180%); backdrop-filter: blur(40px) saturate(180%);
+  box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-shine); }
+dialog::backdrop { background: rgba(0, 0, 0, .35); }
+dialog header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+dialog h2 { margin: 0; font-size: 17px; }
+dialog .footnote { margin: 4px 0 12px; }
+.pics { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 12px; }
+.pic { flex-direction: column; align-items: stretch; gap: 2px; min-height: 0; padding: 6px 6px 8px; border-radius: 16px;
+  background: var(--surface); font-weight: 400; white-space: normal; text-align: left; }
+.pic img { width: 100%; aspect-ratio: 4 / 3; object-fit: contain; /* ganzes Bild, damit man das Seitenverhältnis sieht */ border-radius: 11px; background: var(--control); margin-bottom: 4px; }
+.pic strong { font-weight: 600; font-variant-numeric: tabular-nums; padding: 0 4px; }
+.pic span { color: var(--secondary); font-size: 11px; padding: 0 4px; }
+.pic[aria-pressed=true] { box-shadow: 0 0 0 3px var(--accent); }
+
 /* Barrierefreiheit: "Transparenz reduzieren" → massive Flächen, "Bewegung reduzieren" → keine Animationen */
 @media (prefers-reduced-transparency: reduce) {
-  aside, .tile { background: var(--solid); -webkit-backdrop-filter: none; backdrop-filter: none; }
+  aside, .tile, dialog { background: var(--solid); -webkit-backdrop-filter: none; backdrop-filter: none; }
   #ambient { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }

@@ -8,13 +8,19 @@ Poster-Generator für Spiele, Musikalben, Filme und Serien, druckfertig von A5 b
 
 Die Startseite bietet drei Posterarten als Kacheln, direkt erreichbar über `index.html#spiel`, `#album` und `#film`. Jede Seite merkt sich ihren eigenen Stand.
 
-- **Spiel**: Suche über Wikidata/Wikipedia, ohne Key. Füllt Titel, Entwickler, Genres, Datum und Beschreibung, lädt das Wikipedia-Cover als Platzhalter und das Logo von Steam bzw. Wikidata. Links zu Presskit, Alpha Coders, Google und Wallhaven helfen, ein hochauflösendes Bild zu finden.
+- **Spiel**: Suche über Wikidata/Wikipedia, ohne Key. Füllt Titel, Entwickler, Genres, Datum und Beschreibung und lädt das Logo von Steam bzw. Wikidata.
+  **Bilder** kommen aus allen Quellen gleichzeitig (siehe **Bildauswahl**): Microsoft Store (Key Art, Cover und Screenshots bis 3840 × 2160 px), Steam (bis 3840 × 1240 px), Nintendo eShop (Key Art 1920 × 1080 px, Screenshots), die Fandom-Wiki des Spiels (Box Art und Artworks, oft über 1500 px) und Wikipedia.
 - **Album**: Suche über MusicBrainz, ohne Key, nach Albumtitel oder Künstler; ein Klick auf einen Künstler zeigt seine Diskografie. Füllt Album, Künstler, Label, Genres, Datum und die Titelliste mit Laufzeiten, lädt das Cover in Originalgröße aus dem Cover Art Archive. Die Titelliste steht unter dem Cover in bis zu drei Spalten; ihre Schrift wird kleiner, bis auch lange Titel ganz passen.
   Spotify wird nicht genutzt, weil dessen API immer einen Key verlangt.
 - **Film & Serie**: Umschalter Film | Serie, Layout wie beim Spiel-Poster.
-  - Filme über Wikidata/Wikipedia, ohne Key: Regie, Genres, Laufzeit, Datum, Handlung, Logo; bekannte Filme stehen in der Suche oben. Das Wikipedia-Plakat ist nur ein Platzhalter (~220 px); für hochauflösende Bilder gibt es Links zu TMDB, Alpha Coders, Google und Wallhaven.
-  - Serien über TVmaze, ohne Key: Sender, Genres, Staffeln, Datum, Handlung und ein Szenenbild bis Full HD (sonst das Plakat bis 1250 × 1800 px).
-  - TMDB, OMDb, Trakt und fanart.tv hätten bessere Filmbilder, verlangen aber alle einen Key; iTunes und IMDb sind aus dem Browser nicht abrufbar (kein CORS).
+  - Filme über Wikidata/Wikipedia, ohne Key: Regie, Genres, Laufzeit, Datum, Handlung; bekannte Filme stehen in der Suche oben.
+  - Serien über TVmaze, ohne Key: Sender, Genres, Staffeln, Datum, Handlung.
+  - Bilder aus allen Quellen: Apple TV (Szenenbilder ohne Schrift bis 4320 × 3240 px, Plakate, Staffel-Cover, Standbilder aus Trailern, dazu das Logo als transparentes PNG), TVmaze (alle Szenenbilder, Plakate und Banner), Fandom und Wikipedia.
+- **Bildauswahl**: Nach einem Suchtreffer fragt die App alle Bildquellen ab, misst die Bilder und zeigt die 10 besten mit ihrer Auflösung in einem Fenster; höchstens 4 je Quelle, damit jede Quelle vorkommt. Sortiert wird nach der kürzeren Seite, weil sie bei dem fast quadratischen Bildfeld die nutzbare Auflösung bestimmt. Das beste Bild ist sofort geladen, ein Klick nimmt ein anderes; **Gefundene Bilder…** öffnet die Auswahl wieder.
+  - Die Nummern bei Apple TV, Microsoft Store, Steam und Nintendo sowie die Fandom-Wikis stehen in Wikidata; Serien werden über ihre TVmaze-Nummer dort gefunden. Fehlt die Wiki, rät die App sie aus dem Titel ("Need for Speed: Most Wanted" → needforspeed.fandom.com) und nimmt dort die Seite "Titel (Jahr)".
+  - Apple TV und Nintendo werden über die öffentlichen Schlüssel ihrer Webseiten abgefragt, nicht über Konto-Keys. Ändert sich einer, fehlen nur diese Bilder.
+  - Findet sich nichts Großes, weist die App darauf hin: über die Links zu Presskit, TMDB, Alpha Coders, Google und Wallhaven ein Bild suchen, kopieren und mit **Strg+V** einfügen, oder mit KI hochskalieren.
+  - Nicht nutzbar: TMDB, OMDb, Trakt, fanart.tv, SteamGridDB, IGDB und OpenCritic verlangen einen Key; IMDb, GOG, PlayStation Store, GameTDB, LaunchBox und speedrun.com sperren den Abruf aus dem Browser (kein CORS); die iTunes-Suche findet keine Filme mehr.
 - **Formate**: A5 bis A1 sowie 30 × 40, 40 × 50, 50 × 70, 60 × 90 und 70 × 100 cm. Export mit 300 dpi; die großen Formate liegen etwas darunter, weil ein Export höchstens 50 Megapixel hat (sonst stürzt der Browser ab). Kleine Formate bekommen relativ größere Schrift.
 - **Bildausschnitt**: in der Vorschau ziehen, zoomen mit Mausrad oder Regler, Pfeiltasten verschieben.
 - **Mit KI hochskalieren**: ESRGAN läuft lokal im Browser (WebGL) und rechnet zu kleine Bilder bis zur Druckauflösung hoch (max. 4×).
@@ -33,10 +39,14 @@ Abgefragte Dienste und ihre Datenlizenzen:
 | [Wikidata](https://www.wikidata.org) | Spieldaten, Logo-Verweis | CC0 |
 | [Wikipedia](https://www.wikipedia.org) | Beschreibung, Cover-Platzhalter | Text CC BY-SA 4.0, Bilder je nach Datei |
 | [Wikimedia Commons](https://commons.wikimedia.org) | Logos | je nach Datei |
-| Steam (steamstatic.com) | Spiel-Logo | Rechte beim Publisher |
+| Steam (steamstatic.com) | Spiel-Key-Art, Cover, Logo | Rechte beim Publisher |
+| Microsoft Store (displaycatalog) | Spiel-Key-Art, Cover | Rechte beim Publisher |
+| Nintendo eShop (nintendo.com, Algolia) | Spiel-Key-Art | Rechte bei Nintendo/Publisher |
+| [Fandom](https://www.fandom.com) | Box Art aus Spiele-Wikis | je nach Datei |
+| Apple TV (uts-api.itunes.apple.com) | Film-/Serien-Szenenbilder, Plakate, Logos | Rechte beim Studio/Sender |
 | [MusicBrainz](https://musicbrainz.org) | Albumdaten, Titelliste | Kerndaten CC0, Genres CC BY-NC-SA 3.0 |
 | [Cover Art Archive](https://coverartarchive.org) | Albumcover | Rechte beim Label/Künstler |
-| [TVmaze](https://www.tvmaze.com) | Seriendaten, Szenenbilder, Plakate | Daten CC BY-SA 4.0, Bilder Rechte beim Sender/Studio |
+| [TVmaze](https://www.tvmaze.com) | Seriendaten, Szenenbilder, Plakate (Rückfall) | Daten CC BY-SA 4.0, Bilder Rechte beim Sender/Studio |
 
 MusicBrainz erlaubt eine Anfrage pro Sekunde; die Albumsuche hält sich daran und ist deshalb etwas langsamer als die Spielesuche.
 
