@@ -17,11 +17,13 @@ const STORE = MODE === 'game' ? '' : MODE + '-'; // jede Seite speichert für si
 // aus der Nähe, große aus der Entfernung. Titel wachsen schwächer (Exponent 0,6), damit sie klein nicht erschlagen.
 const FORMATS = { a5: [14.8, 21], a4: [21, 29.7], a3: [29.7, 42], a2: [42, 59.4], a1: [59.4, 84.1],
   '30x40': [30, 40], '40x50': [40, 50], '50x70': [50, 70], '60x90': [60, 90], '70x100': [70, 100] };
+// Querformat: dieselben Formate gedreht; die Schrift richtet sich weiter nach der kurzen Seite, damit sie gedruckt so groß ist wie im Hochformat
 function format() {
-  const key = FORMATS[$('size').value] ? $('size').value : '50x70', [w, h] = FORMATS[key], inch = 2.54;
+  const key = FORMATS[$('size').value] ? $('size').value : '50x70', [sw, lw] = FORMATS[key], land = $('orientLandscape').checked, inch = 2.54;
+  const [w, h] = land ? [lw, sw] : [sw, lw];
   // ponytail: höchstens 50 MP pro Export gegen Speicherabstürze im Browser, große Formate liegen daher unter 300 dpi
   const dpi = Math.min(300, Math.floor(Math.sqrt(50e6 / (w / inch * h / inch))));
-  return { key, w, h, dpi, UH: U * h / w, px: [Math.round(w / inch * dpi), Math.round(h / inch * dpi)], t: Math.sqrt(50 / w) };
+  return { key, land, w, h, dpi, UH: U * h / w, px: [Math.round(w / inch * dpi), Math.round(h / inch * dpi)], t: Math.sqrt(50 / sw) };
 }
 
 function wrap(ctx, text, maxW) {
@@ -61,58 +63,18 @@ const runtime = text => {
 };
 
 // Misst alle Texte aus und verteilt sie. b/h: Faktor für Fließtext/Titel; fit < 1 verkleinert alles, wenn das Bild sonst zu klein würde.
-// Spiel: Kopf (Farbbalken, Meta, Titel) über dem Bild. Album: quadratisches Cover oben, Kopf darunter, Titelliste statt Beschreibung
+// Spiel: Kopf (Farbbalken, Meta, Titel) über dem Bild. Album: quadratisches Cover oben, Kopf darunter, Titelliste statt Beschreibung.
+// Querformat: planLandscape. L.x0/L.r: linker und rechter Rand des Textes (Hochformat: Satzspiegel)
 function plan(ctx, F, fit) {
+  if (F.land) return planLandscape(ctx, F, fit);
   const v = id => $(id).value, b = F.t * fit, h = F.t ** .6 * fit, album = isAlbum();
   // fs/cap/step: Schrift, Versalhöhe und Zeilenabstand unten links; die Titelliste ist größer als die Spiel-Beschreibung
-  const L = { b, h, meta: [], title: [], bottom: F.UH - M, fs: (album ? 18 : 11) * b, cap: (album ? 13 : 7.9) * b, step: (album ? 24 : 12.5) * b };
-
-  // Meta rechts, y ab Oberkante des Farbbalkens: "Label /" vor der ersten Zeile, Werte rechtsbündig; Versalhöhe bündig mit dem Balken
-  let y = 8 * b, metaLeft = R, metaBottom = 0;
-  const meta = album ? [['Label', v('company')], ['Genres', v('genres')], ['Laufzeit', runtime(v('tracks'))]]
-    : isFilm() ? [[isSeries() ? 'Sender' : 'Regie', v('company')], ['Genres', v('genres')], [isSeries() ? 'Staffeln' : 'Laufzeit', v('runtime')]]
-    : [['Company', v('company')], ['Genres', v('genres')]];
-  for (const [label, text] of meta) {
-    const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
-    if (!lines.length) continue;
-    ctx.font = font(400, 11.3 * b);
-    const widths = lines.map(l => ctx.measureText(l).width);
-    ctx.font = font(700, 11.3 * b);
-    L.meta.push({ label, lines, y, labelX: R - widths[0] - 7 * b });
-    metaLeft = Math.min(metaLeft, R - widths[0] - 7 * b - ctx.measureText(label + ' /').width, R - Math.max(...widths));
-    metaBottom = y + (lines.length - 1) * 12.8 * b + 3 * b;
-    y += (lines.length - 1) * 12.8 * b + 27 * b;
-  }
-
-  // Titel + Untertitel, rechts Platz fürs Logo; Laufweite: Helvetica Neue läuft ~3 % enger als Heros
-  const logo = !album && state.logo;
-  L.ls = logo ? Math.min(110 * h / logo.width, 28 * h / logo.height) : 0;
-  const tw = CW - (logo ? logo.width * L.ls + 20 * h : 0);
-  for (const [size, text] of [[85, v('title')], [50, v('subtitle')]]) {
-    let px = size * h;
-    const setFont = () => { ctx.font = font(700, px); ctx.letterSpacing = -.028 * px + 'px'; };
-    setFont();
-    // eine Zeile, die nur knapp nicht passt, lieber bis 80 % verkleinern als umbrechen
-    const widest = Math.max(0, ...text.split('\n').map(l => ctx.measureText(l.trim()).width));
-    if (widest > tw) { px *= Math.max(.8, tw / widest); setFont(); }
-    wrap(ctx, text, tw).forEach((line, i) => L.title.push({ px, line, w: ctx.measureText(line).width, adv: px + (i ? 0 : 2 * h) }));
-  }
-  ctx.letterSpacing = '0px';
-  // Letzte Titel-Grundlinie ab Balkenoberkante: so tief, dass keine Zeile in Farbbalken oder Meta-Block ragt
-  let titleRel = 0;
-  for (let i = L.title.length - 1, off = 0; i >= 0; off += L.title[i--].adv) { // off: letzte Grundlinie → Grundlinie dieser Zeile
-    const t = L.title[i], above = M + t.w > metaLeft - 8 * b ? metaBottom + 8 * b : 20 * h;
-    titleRel = Math.max(titleRel, above + off + t.px * .72);
-  }
+  const L = { b, h, x0: M, r: R, meta: [], title: [], bottom: F.UH - M, fs: (album ? 18 : 11) * b, cap: (album ? 13 : 7.9) * b, step: (album ? 24 : 12.5) * b };
+  const { titleRel, metaBottom } = planHead(ctx, L, CW);
 
   // Unten: Beschreibung bzw. Titelliste links, "/Jahr Datum" rechts, beides an der Grundlinie
   const year = v('year'), day = v('day');
-  ctx.font = font(400, 14 * b);
-  const dayW = ctx.measureText(day).width;
-  ctx.font = font(700, 45 * b);
-  ctx.letterSpacing = -2.8 * b + 'px'; // Heros-Ziffern sind breiter als die von Helvetica Neue
-  L.slashX = R - Math.max(ctx.measureText(year).width, dayW) - 17 * b;
-  ctx.letterSpacing = '0px';
+  planYear(ctx, L);
   ctx.font = font(400, L.fs);
   const leftW = (year || day ? L.slashX - (album ? 50 : 20) * b : R) - M; // die große Titelliste braucht mehr Abstand zum Jahr
   let lines;
@@ -121,8 +83,7 @@ function plan(ctx, F, fit) {
     const cw = (leftW - (cols - 1) * 30 * b) / cols;
     // Schrift so weit verkleinern, dass der längste Titel samt Nummer und Dauer in seine Spalte passt,
     // aber nicht kleiner als die Spiel-Beschreibung (11); erst darunter wird mit "…" gekürzt
-    const need = 1.78 * L.fs + Math.max(0, ...list.map(([n, d]) => ctx.measureText(n).width + (d ? ctx.measureText(d).width + .67 * L.fs : 0)));
-    const k = Math.max(11 * b / L.fs, Math.min(1, cw / need));
+    const k = Math.max(11 * b / L.fs, Math.min(1, cw / trackNeed(ctx, L, list)));
     L.fs *= k; L.cap *= k; L.step *= k;
     L.tracks = { list, rows: lines = Math.ceil(list.length / cols), cw };
   } else lines = (L.desc = wrap(ctx, v('desc'), leftW)).length;
@@ -146,17 +107,126 @@ function plan(ctx, F, fit) {
   }
   return L;
 }
+// Kopf: Meta rechtsbündig an L.r, Titel ab L.x0 in der Breite width (abzüglich Logo). Gibt die letzte Titel-Grundlinie und das Meta-Ende
+// relativ zur Oberkante des Farbbalkens zurück
+function planHead(ctx, L, width) {
+  const v = id => $(id).value, { b, h } = L, album = isAlbum(), R = L.r;
+  // Meta rechts, y ab Oberkante des Farbbalkens: "Label /" vor der ersten Zeile, Werte rechtsbündig; Versalhöhe bündig mit dem Balken.
+  // Querformat: reicht die erste Zeile in der schmalen Spalte bis an den Farbbalken, beginnt der Block unter dem Balken
+  const meta = album ? [['Label', v('company')], ['Genres', v('genres')], ['Laufzeit', runtime(v('tracks'))]]
+    : isFilm() ? [[isSeries() ? 'Sender' : 'Regie', v('company')], ['Genres', v('genres')], [isSeries() ? 'Staffeln' : 'Laufzeit', v('runtime')]]
+    : [['Company', v('company')], ['Genres', v('genres')]];
+  let y, metaLeft, metaBottom, firstLeft;
+  const layout = y0 => {
+    y = y0; metaLeft = R; metaBottom = 0; firstLeft = R; L.meta = [];
+    for (const [label, text] of meta) {
+      const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+      if (!lines.length) continue;
+      ctx.font = font(400, 11.3 * b);
+      const widths = lines.map(l => ctx.measureText(l).width);
+      ctx.font = font(700, 11.3 * b);
+      L.meta.push({ label, lines, y, labelX: R - widths[0] - 7 * b });
+      if (L.meta.length === 1) firstLeft = R - widths[0] - 7 * b - ctx.measureText(label + ' /').width;
+      metaLeft = Math.min(metaLeft, R - widths[0] - 7 * b - ctx.measureText(label + ' /').width, R - Math.max(...widths));
+      metaBottom = y + (lines.length - 1) * 12.8 * b + 3 * b;
+      y += (lines.length - 1) * 12.8 * b + 27 * b;
+    }
+  };
+  layout(8 * b);
+  if (L.land && firstLeft < L.x0 + 5 * 34 * h + 12 * b) layout(8.5 * h + 22 * b);
+
+  // Titel + Untertitel, rechts Platz fürs Logo; Laufweite: Helvetica Neue läuft ~3 % enger als Heros
+  const logo = !album && state.logo;
+  L.ls = logo ? Math.min(110 * h / logo.width, 28 * h / logo.height) : 0;
+  const tw = width - (logo ? logo.width * L.ls + 20 * h : 0);
+  for (const [size, text] of [[85, v('title')], [50, v('subtitle')]]) {
+    let px = size * h;
+    const setFont = () => { ctx.font = font(700, px); ctx.letterSpacing = -.028 * px + 'px'; };
+    setFont();
+    // eine Zeile, die nur knapp nicht passt, lieber bis 80 % verkleinern als umbrechen
+    const widest = Math.max(0, ...text.split('\n').map(l => ctx.measureText(l.trim()).width));
+    if (widest > tw) { px *= Math.max(.8, tw / widest); setFont(); }
+    // Querformat: ein einzelnes Wort, das auch so nicht in die schmale Spalte passt, weiter verkleinern (umbrechen geht nicht)
+    const word = Math.max(0, ...text.split(/\s+/).map(w => ctx.measureText(w).width));
+    if (L.land && word > tw) { px *= tw / word; setFont(); }
+    wrap(ctx, text, tw).forEach((line, i) => L.title.push({ px, line, w: ctx.measureText(line).width, adv: px + (i ? 0 : 2 * h) }));
+  }
+  ctx.letterSpacing = '0px';
+  // Letzte Titel-Grundlinie ab Balkenoberkante: so tief, dass keine Zeile in Farbbalken oder Meta-Block ragt
+  let titleRel = 0;
+  for (let i = L.title.length - 1, off = 0; i >= 0; off += L.title[i--].adv) { // off: letzte Grundlinie → Grundlinie dieser Zeile
+    const t = L.title[i], above = L.x0 + t.w > metaLeft - 8 * b ? metaBottom + 8 * b : 20 * h;
+    titleRel = Math.max(titleRel, above + off + t.px * .72);
+  }
+  return { titleRel, metaBottom };
+}
+function planYear(ctx, L) { // "/Jahr Datum" unten rechts: L.slashX = Fuß des Schrägstrichs
+  const b = L.b;
+  ctx.font = font(400, 14 * b);
+  const dayW = ctx.measureText($('day').value).width;
+  ctx.font = font(700, 45 * b);
+  ctx.letterSpacing = -2.8 * b + 'px'; // Heros-Ziffern sind breiter als die von Helvetica Neue
+  L.slashX = L.r - Math.max(ctx.measureText($('year').value).width, dayW) - 17 * b;
+  ctx.letterSpacing = '0px';
+}
+// Breite der längsten Zeile der Titelliste (Nummer, Titel, Dauer) in der aktuellen Schrift L.fs
+function trackNeed(ctx, L, list) {
+  ctx.font = font(400, L.fs);
+  return 1.78 * L.fs + Math.max(0, ...list.map(([n, d]) => ctx.measureText(n).width + (d ? ctx.measureText(d).width + .67 * L.fs : 0)));
+}
+// Querformat: Bild links über die volle Höhe (Album: quadratisches Cover), rechts daneben eine Textspalte mit Farbbalken, Meta und Titel oben,
+// darunter Beschreibung bzw. Titelliste und unten rechts "/Jahr Datum". Ränder und Schrift wie im Hochformat gleicher Größe (Faktor q),
+// L.over > 0: Text passt nicht in die Spalte
+function planLandscape(ctx, F, fit) {
+  const v = id => $(id).value, album = isAlbum(), q = F.h / F.w, b = F.t * q * fit, h = F.t ** .6 * q * fit;
+  const m = M * q, bottom = F.UH - m, inner = U - 2 * m;
+  const L = { land: true, b, h, r: U - m, meta: [], title: [], bottom, fs: (album ? 18 : 11) * b, cap: (album ? 13 : 7.9) * b, step: (album ? 24 : 12.5) * b };
+  // Spiel/Film: Bild 58 % der Breite, fast quadratisch wie im Hochformat; Album: Cover höchstens 55 %, damit die Titelliste Platz hat
+  L.iw = album ? Math.min(bottom - m, .55 * inner) : .58 * inner;
+  L.ih = album ? L.iw : bottom - m;
+  L.imgX = m; L.imgTop = m + (bottom - m - L.ih) / 2;
+  L.x0 = m + L.iw + 50 * q;
+  const cw = L.r - L.x0, { titleRel, metaBottom } = planHead(ctx, L, cw);
+  L.barY = L.imgTop; // Farbbalken bündig mit der Bildoberkante, "/Jahr" mit der Unterkante
+  L.bottom = L.imgTop + L.ih;
+  L.titleY = L.barY + titleRel;
+  planYear(ctx, L);
+  // Beschreibung bzw. Titelliste unten über "/Jahr", wie im Hochformat: Kopf oben, Fuß unten, dazwischen Luft
+  const top = Math.max(L.titleY, L.barY + metaBottom) + 34 * b, end = L.bottom - 45.6 * b - 30 * b, room = end - top;
+  if (album) { // so wenige Spalten wie möglich; die Schrift wird schmaler Spalten wegen kleiner, aber nicht unter 11
+    const list = trackList(v('tracks')), need = trackNeed(ctx, L, list);
+    let best;
+    for (let cols = 1; cols <= 3; cols++) {
+      const colW = (cw - (cols - 1) * 30 * b) / cols, k = Math.max(11 * b / L.fs, Math.min(1, colW / need)), rows = Math.ceil(list.length / cols) || 1;
+      const over = (L.cap + (rows - 1) * L.step) * k - room;
+      if (!best || over < best.over) best = { cols, colW, k, rows, over };
+      if (over <= 0) break;
+    }
+    L.fs *= best.k; L.cap *= best.k; L.step *= best.k;
+    L.tracks = { list, rows: best.rows, cw: best.colW };
+    L.over = list.length ? best.over : -room;
+    L.blockTop = end - (L.cap + (best.rows - 1) * L.step);
+  } else {
+    ctx.font = font(400, L.fs);
+    const lines = (L.desc = wrap(ctx, v('desc'), cw)).length;
+    L.over = (lines ? L.cap + (lines - 1) * L.step : 0) - room;
+    L.blockTop = end - (L.cap + (lines - 1) * L.step);
+  }
+  return L;
+}
 
 // o: Versatz in Pixeln (Beschnittzugabe), preview: Hinweise zeichnen, die nicht in den Export gehören
 function draw(ctx, s, o = 0, preview = false) {
   const F = format(), v = id => $(id).value;
   let L;
   const minIh = isAlbum() ? Math.min(.45 * F.UH, .8 * CW) : .45 * F.UH; // das Albumcover ist ohnehin auf 80 % Breite begrenzt
+  const fits = L => L.land ? L.over <= 0 : L.ih >= minIh; // Querformat: der Text passt in die Spalte neben dem Bild
   for (let i = 0; i <= 5; i++) { // Schrift in 5-%-Schritten bis 75 % verkleinern, bis das Bild mind. 45 % der Höhe hat
     L = plan(ctx, F, 1 - i * .05);
-    if (L.ih >= minIh) break;
+    if (fits(L)) break;
   }
-  state.crowded = L.ih < minIh;
+  state.crowded = !fits(L);
+  state.layout = L;
   const { b, h } = L;
 
   ctx.setTransform(s, 0, 0, s, o, o);
@@ -167,14 +237,14 @@ function draw(ctx, s, o = 0, preview = false) {
   ctx.fillRect(0, 0, U, F.UH);
   document.querySelectorAll('.swatches input').forEach((c, i) => {
     ctx.fillStyle = c.value;
-    ctx.fillRect(M + i * 34 * h, L.barY, 34.5 * h, 8.5 * h);
+    ctx.fillRect(L.x0 + i * 34 * h, L.barY, 34.5 * h, 8.5 * h);
   });
 
   ctx.fillStyle = fg;
   ctx.textAlign = 'right';
   for (const m of L.meta) {
     ctx.font = font(400, 11.3 * b);
-    m.lines.forEach((l, i) => ctx.fillText(l, R, L.barY + m.y + i * 12.8 * b));
+    m.lines.forEach((l, i) => ctx.fillText(l, L.r, L.barY + m.y + i * 12.8 * b));
     ctx.font = font(700, 11.3 * b);
     ctx.fillText(m.label + ' /', m.labelX, L.barY + m.y);
   }
@@ -184,20 +254,20 @@ function draw(ctx, s, o = 0, preview = false) {
   for (const t of [...L.title].reverse()) {
     ctx.font = font(700, t.px);
     ctx.letterSpacing = -.028 * t.px + 'px';
-    ctx.fillText(t.line, M, y);
+    ctx.fillText(t.line, L.x0, y);
     y -= t.adv;
   }
   ctx.letterSpacing = '0px';
   const logo = L.ls && state.logo;
-  if (logo) ctx.drawImage(logo, R - logo.width * L.ls, L.imgTop - 13 * h - logo.height * L.ls, logo.width * L.ls, logo.height * L.ls);
+  if (logo) ctx.drawImage(logo, L.r - logo.width * L.ls, L.titleY + 10 * h - logo.height * L.ls, logo.width * L.ls, logo.height * L.ls);
 
   const year = v('year'), day = v('day');
   ctx.textAlign = 'right';
   ctx.font = font(400, 14 * b);
-  ctx.fillText(day, R, L.bottom);
+  ctx.fillText(day, L.r, L.bottom);
   ctx.font = font(700, 45 * b);
   ctx.letterSpacing = -2.8 * b + 'px';
-  ctx.fillText(year, R, L.bottom - 13 * b);
+  ctx.fillText(year, L.r, L.bottom - 13 * b);
   ctx.letterSpacing = '0px';
   if (year || day) {
     ctx.strokeStyle = fg;
@@ -207,11 +277,11 @@ function draw(ctx, s, o = 0, preview = false) {
   ctx.font = font(400, L.fs);
   ctx.textAlign = 'left';
   const lineY = i => L.blockTop + L.cap + i * L.step;
-  L.desc?.forEach((l, i) => ctx.fillText(l, M, lineY(i)));
+  L.desc?.forEach((l, i) => ctx.fillText(l, L.x0, lineY(i)));
   if (L.tracks) { // "01  Titel … 4:20" je Spalte, zu lange Titel mit Auslassungspunkten
     const { list, rows, cw } = L.tracks;
     list.forEach(([name, dur], i) => {
-      const x = M + Math.floor(i / rows) * (cw + 30 * b), y = lineY(i % rows);
+      const x = L.x0 + Math.floor(i / rows) * (cw + 30 * b), y = lineY(i % rows);
       ctx.font = font(700, L.fs);
       ctx.textAlign = 'left';
       ctx.fillText(String(i + 1).padStart(2, '0'), x, y);
@@ -243,7 +313,7 @@ function draw(ctx, s, o = 0, preview = false) {
     ctx.fillStyle = 'rgba(239, 233, 220, .5)';
     ctx.font = font(400, 16 * b);
     ctx.textAlign = 'center';
-    ctx.fillText('Bild hier ablegen oder links auswählen', U / 2, imgTop + ih / 2);
+    ctx.fillText('Bild hier ablegen oder links auswählen', imgX + iw / 2, imgTop + ih / 2);
   }
 }
 
@@ -336,7 +406,7 @@ document.addEventListener('input', e => {
 
 // Speichern: Felder in localStorage, Bilder in IndexedDB (localStorage ist dafür zu klein), Projekte als Datei
 const SELFTEST = location.hash === '#selftest'; // Selbsttest darf gespeicherte Arbeit nicht überschreiben
-const saved = () => document.querySelectorAll('#form input[id]:not([type=file]):not(#game), #form textarea, #bleed, #format, #size');
+const saved = () => document.querySelectorAll('#form input[id]:not([type=file]):not(#game), #form textarea, #bleed, #format, #size, #orientPortrait, #orientLandscape');
 const snapshot = () => Object.fromEntries([...saved()].map(el => [el.id, /checkbox|radio/.test(el.type) ? el.checked : el.value]));
 function restore(data) {
   for (const el of saved()) if (data && el.id in data) el[/checkbox|radio/.test(el.type) ? 'checked' : 'value'] = data[el.id];
@@ -503,26 +573,66 @@ async function wm(host, params) { // MediaWiki-API (Wikidata, Commons), origin=*
 const wd = params => wm('www.wikidata.org', params);
 const claims = (e, p) => (e?.claims?.[p] || []).map(c => c.mainsnak?.datavalue?.value).filter(Boolean);
 const wdLabel = e => (e?.labels?.en || e?.labels?.mul || e?.labels?.de)?.value || '';
-const wdDate = e => claims(e, 'P577').filter(t => t.precision >= 9) // früheste Angabe mit der genauesten Präzision
+const wdDate = (e, p = 'P577') => claims(e, p).filter(t => t.precision >= 9) // früheste Angabe mit der genauesten Präzision
   .sort((a, b) => b.precision - a.precision || a.time.localeCompare(b.time))[0];
+const wdStart = (e, kind) => kind === 'series' && wdDate(e, 'P580') || wdDate(e); // Serien: Startdatum (P580), sonst Veröffentlichung
 // "racing video game" → "Racing", "science fiction film" → "Science Fiction"
 const genreName = s => s.replace(/ ((video )?games?|films?)$/i, '').replace(/(^|[\s-])\S/g, c => c.toUpperCase());
-// film: Film, Animationsfilm, Animationsspielfilm, Spielfilm, Anime-Film (Wikidata kennt keine Unterklassen-Suche)
-async function wikidataSearch(q, film = false) {
-  const cls = film ? 'P31=Q11424|P31=Q202866|P31=Q29168811|P31=Q24869|P31=Q20650540' : 'P31=Q7889';
-  const ids = (await wd({ action: 'query', list: 'search', srsearch: q + ' haswbstatement:' + cls, srlimit: 10 })).query.search.map(r => r.title);
+// Was als Spiel, Film oder Serie zählt: Klassen (P31) für die Volltextsuche (sie kennt keine Unterklassen, daher die häufigsten einzeln;
+// Filmprojekt Q18011172 = angekündigter Film wie "The Odyssey" vor dem Start) und die Beschreibung für die Titelsuche, die ohne Klassen sucht
+const WD_KIND = {
+  game: { cls: ['Q7889', 'Q16070115', 'Q21125433'],
+    desc: /\b(video ?game|computerspiel|videospiel)\b(?! ?(series|franchise|reihe|developer|publisher|company|character|engine|console|designer|composer|music))/i },
+  film: { cls: ['Q11424', 'Q202866', 'Q29168811', 'Q24869', 'Q20650540', 'Q18011172', 'Q506240', 'Q93204', 'Q24862', 'Q226730', 'Q229390', 'Q52207399'],
+    desc: /\b(film|movie|spielfilm)\b(?! (series|franchise|director|producer|actor|actress|editor|critic|studio|festival|score|character|company|award|composer|distributor|production))/i },
+  series: { cls: ['Q5398426', 'Q1259759', 'Q63952888', 'Q526877', 'Q581714', 'Q117467246'],
+    desc: /\b(television|tv|web|anime|animated|streaming)[ -]?(mini)?(series|show)\b|\bminiseries\b|fernsehserie|\b(mini|web|zeichentrick|anime)serie\b/i },
+};
+const WD_NOT = /\b(soundtrack|album|song|single|novel|book|episode|season|staffel|character|figur|award|list|liste|franchise|series of|poem)\b/i;
+const ARTICLES = new Set(['the', 'a', 'an', 'der', 'die', 'das', 'le', 'la', 'les', 'el', 'il']);
+const titleKey = s => fold(s).filter((w, i) => i || !ARTICLES.has(w)).join(' '); // "The Odyssey" → "odyssey"
+// Suche nach Spielen, Filmen und Serien in Wikidata, vier Wege gleichzeitig, damit auch ganz neue und falsch geschriebene Titel gefunden werden:
+// Volltext mit Klasse, dieselbe unscharf ("odyssee" → "Odyssey"), Titelsuche auf Englisch und Deutsch (Wortanfänge, Aliasse, deutsche Titel)
+async function wikidataSearch(q, kind = 'game') {
+  const { cls, desc } = WD_KIND[kind], filter = ' haswbstatement:' + cls.map(c => 'P31=' + c).join('|');
+  const fits = d => !!d && desc.test(d) && !WD_NOT.test(d), words = fold(q);
+  const full = s => wd({ action: 'query', list: 'search', srsearch: s + filter, srlimit: 50 }).then(r => r.query.search.map(r => r.title));
+  const prefix = lang => wd({ action: 'wbsearchentities', search: q, language: lang, uselang: lang, type: 'item', limit: 20 })
+    .then(r => (r.search || []).filter(r => !r.description || fits(r.description)).map(r => r.id));
+  const found = await Promise.allSettled([full(q), words.some(w => w.length > 3) ? full(words.map(w => w.length > 3 ? w + '~' : w).join(' ')) : [],
+    prefix('en'), prefix('de')]);
+  if (found.every(r => r.status === 'rejected')) throw found[0].reason;
+  const [exact, fuzzy, en, de] = found.map(r => r.value || []), sure = new Set([...exact, ...fuzzy]); // Volltext: Klasse schon geprüft
+  const ids = [...new Set([...exact, ...en, ...de, ...fuzzy])].slice(0, 150);
   if (!ids.length) return [];
-  const { entities } = await wd({ action: 'wbgetentities', ids: ids.join('|'), props: 'labels|claims|sitelinks', languages: 'en|mul|de' });
-  const hits = ids.map(id => entities[id]).filter(wdLabel);
-  // Filme: bekannteste zuerst (Zahl der Wikipedia-Sprachversionen), die Suche selbst reiht "toy story" 1995 sonst weit hinten ein
-  if (film) hits.sort((a, b) => Object.keys(b.sitelinks || {}).length - Object.keys(a.sitelinks || {}).length);
-  return hits.map(e => ({ name: wdLabel(e), info: wdDate(e)?.time.slice(1, 5), load: () => wikidataGame(e, film) }));
+  const get = (list, props) => Promise.all(Array.from({ length: Math.ceil(list.length / 50) }, (_, i) =>
+    wd({ action: 'wbgetentities', ids: list.slice(i * 50, i * 50 + 50).join('|'), props, languages: 'en|mul|de' }).then(r => r.entities || {})))
+    .then(l => Object.assign({}, ...l));
+  const descs = e => Object.values(e.descriptions || {}).map(d => d.value);
+  const ok = (id, e) => sure.has(id) || descs(e).some(fits) || claims(e, 'P31').some(v => cls.includes(v.id));
+  // Reihenfolge: genau der gesuchte Titel (auch als Alias, ohne Artikel), dann Titel, die so anfangen, sonst der Rest;
+  // innerhalb davon die bekanntesten (Zahl der Wikipedia-Sprachversionen), die Suche selbst reiht "toy story" 1995 sonst weit hinten ein
+  const light = await get(ids, 'labels|aliases|descriptions|sitelinks'), nq = titleKey(q);
+  const tier = e => {
+    const n = [...Object.values(e.labels || {}), ...Object.values(e.aliases || {}).flat()].map(x => titleKey(x.value));
+    return n.includes(nq) ? 2 : n.some(x => x.startsWith(nq)) ? 1 : 0;
+  };
+  const top = ids.map(id => [id, light[id]]).filter(([id, e]) => e && wdLabel(e) && (sure.has(id) || !descs(e).length || descs(e).some(fits)))
+    .map(([id, e]) => ({ id, t: tier(e), l: Object.keys(e.sitelinks || {}).length })).sort((a, b) => b.t - a.t || b.l - a.l).slice(0, 20).map(x => x.id);
+  if (!top.length) return [];
+  const entities = await get(top, 'labels|descriptions|claims|sitelinks');
+  return top.filter(id => entities[id] && ok(id, entities[id])).slice(0, 12).map(id => {
+    const e = entities[id], year = wdStart(e, kind)?.time.slice(1, 5), tvmaze = +claims(e, 'P8600')[0] || 0;
+    // Serien mit TVmaze-Nummer laden über TVmaze (Staffeln, Szenenbilder), die übrigen direkt aus Wikidata
+    return { name: wdLabel(e), info: year, tvmaze, load: tvmaze ? () => tvmazeShow(tvmaze, wdLabel(e), year) : () => wikidataGame(e, kind) };
+  });
 }
-async function wikidataGame(e, film = false) {
-  const dev = claims(e, film ? 'P57' : 'P178')[0]?.id, genres = claims(e, 'P136').map(v => v.id).slice(0, 6), logoFile = claims(e, 'P154')[0];
+async function wikidataGame(e, kind = 'game') {
+  const film = kind === 'film', series = kind === 'series', game = kind === 'game';
+  const dev = claims(e, film ? 'P57' : series ? 'P449' : 'P178')[0]?.id, genres = claims(e, 'P136').map(v => v.id).slice(0, 6), logoFile = claims(e, 'P154')[0];
   const ids = [dev, ...genres].filter(Boolean);
   const [lang, page] = e.sitelinks?.enwiki ? ['en', e.sitelinks.enwiki.title] : e.sitelinks?.dewiki ? ['de', e.sitelinks.dewiki.title] : [];
-  const date = wdDate(e);
+  const date = wdStart(e, kind);
   const [names, summary, logo, apple, ...more] = await Promise.all([
     ids.length ? wd({ action: 'wbgetentities', ids: ids.join('|'), props: 'labels', languages: 'en|mul|de' }).then(r => r.entities) : {},
     page ? fetch(`https://${lang}.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(page)}`).then(r => r.ok ? r.json() : {}, () => ({})) : {},
@@ -530,10 +640,10 @@ async function wikidataGame(e, film = false) {
     logoFile ? wm('commons.wikimedia.org', { action: 'query', titles: 'File:' + logoFile, prop: 'imageinfo', iiprop: 'url', iiurlwidth: 1200 })
       .then(r => Object.values(r.query.pages)[0]?.imageinfo?.[0]?.thumburl, () => null) : null,
     // alle Bildquellen gleichzeitig; die Nummern bei Apple, Microsoft und Nintendo sowie die Wikis stehen in Wikidata
-    appleTv('movies', film && claims(e, 'P9586')[0]), fandomArt(claims(e, 'P6262'), wdLabel(e), date?.time.slice(1, 5)),
-    ...film ? [] : [xboxArt(claims(e, 'P5885')[0]), nintendoArt(claims(e, 'P8084')[0], wdLabel(e))],
+    appleTv(series ? 'shows' : 'movies', !game && claims(e, series ? 'P9751' : 'P9586')[0]), fandomArt(claims(e, 'P6262'), wdLabel(e), date?.time.slice(1, 5)),
+    ...game ? [xboxArt(claims(e, 'P5885')[0]), nintendoArt(claims(e, 'P8084')[0], wdLabel(e))] : [],
   ]);
-  const steam = !film && claims(e, 'P1733')[0], minutes = claims(e, 'P2047')[0]; // Dauer in Minuten (Q7727) oder Sekunden
+  const steam = game && claims(e, 'P1733')[0], minutes = claims(e, 'P2047')[0], seasons = claims(e, 'P2437')[0]; // Dauer in Minuten (Q7727) oder Sekunden
   const steamImg = f => `https://shared.steamstatic.com/store_item_assets/steam/apps/${steam}/${f}`;
   const fields = gameFields({
     name: wdLabel(e),
@@ -542,7 +652,7 @@ async function wikidataGame(e, film = false) {
     genres: [...new Set(genres.map(id => genreName(wdLabel(names[id]))).filter(Boolean))],
     description: summary.extract,
     website: claims(e, 'P856')[0],
-    runtime: film && minutes ? Math.round(+minutes.amount / (minutes.unit.endsWith('/Q11574') ? 60 : 1)) + ' Min.' : '',
+    runtime: film && minutes ? Math.round(+minutes.amount / (minutes.unit.endsWith('/Q11574') ? 60 : 1)) + ' Min.' : series && seasons ? String(+seasons.amount) : '',
   });
   if (!fields.year && date) fields.year = date.time.slice(1, 5);
   const wiki = summary.originalimage; // Wikipedia-Cover, meist nur ~300 px
@@ -632,16 +742,27 @@ async function mb(path, params, retry = true) { // MusicBrainz erlaubt 1 Anfrage
 }
 const credit = ac => (ac || []).map(a => a.name + (a.joinphrase || '')).join('');
 const fold = s => s.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '').split(/[^\p{L}\p{N}]+/u).filter(Boolean); // "Die Ärzte" → [die, arzte]
-const albumHit = g => ({ name: g.title, load: () => albumLoad(g),
+const albumKey = (title, artist) => fold(title).join(' ') + '|' + fold(artist || '').join(' '); // gleiches Album aus beiden Quellen nur einmal zeigen
+const albumHit = g => ({ name: g.title, key: albumKey(g.title, credit(g['artist-credit'])), load: () => albumLoad(g),
   info: [credit(g['artist-credit']), g['first-release-date']?.slice(0, 4), ...(g['secondary-types'] || [])].filter(Boolean).join(' · ') });
+// Alben: MusicBrainz zuerst, dazu Apple Music für alles, was dort (noch) fehlt, etwa Alben der letzten Wochen
 async function albumSearch(q) {
+  const [mbr, apple] = await Promise.allSettled([mbAlbumSearch(q), itunesAlbums(q)]);
+  if (mbr.status === 'rejected' && apple.status === 'rejected') throw mbr.reason;
+  const hits = mbr.value || [], known = new Set(hits.map(h => h.key));
+  return [...hits, ...(apple.value || []).filter(h => !known.has(h.key)).slice(0, 8)];
+}
+async function mbAlbumSearch(q) {
   // jedes Wort muss im Albumtitel oder beim Künstler vorkommen ("abbey road beatles"), der ganze Text als Albumtitel zählt extra;
   // klein geschrieben, damit AND/OR keine Operatoren werden. Das letzte Wort zählt als Wortanfang, damit schon beim Tippen
   // etwas kommt ("rammst"); nicht bei Sonderzeichen ("ac/dc"), daran scheitert der Platzhalter
   const esc = s => s.replace(/[+\-&|!(){}[\]^"~*?:\\/]/g, '\\$&'), words = q.toLowerCase().split(/\s+/).filter(Boolean);
   const terms = words.map((w, i) => esc(w) + (i === words.length - 1 && /^[\p{L}\p{N}]+$/u.test(w) ? '*' : ''));
   const query = `+(${terms.map(t => `(releasegroup:${t} OR artist:${t})`).join(' AND ')}) releasegroup:"${esc(words.join(' '))}"^8 +(primarytype:album OR primarytype:ep)`;
-  const groups = (await mb('release-group', { query, limit: 100 }))['release-groups'] || [];
+  let groups = (await mb('release-group', { query, limit: 100 }))['release-groups'] || [];
+  // nichts gefunden: unscharf nochmal ("rammstien" → Rammstein), jedes Wort darf sich um ein, zwei Buchstaben unterscheiden
+  if (!groups.length && words.some(w => w.length > 3)) groups = (await mb('release-group', { limit: 100, query: `+(${words.map(w => esc(w) + (w.length > 3 ? '~' : ''))
+    .map(t => `(releasegroup:${t} OR artist:${t})`).join(' AND ')}) +(primarytype:album OR primarytype:ep)` }))['release-groups'] || [];
   // MusicBrainz kennt keine Beliebtheit; viele Veröffentlichungen (count) heißt bekanntes Album: "thriller" → Michael Jackson statt der Band Thriller.
   // Compilations, Live, Karaoke usw. hinter die Studioalben
   const rank = g => (g.score || 0) + 20 * Math.log10(1 + (g.count || 0)) - (g['secondary-types']?.length ? 15 : 0);
@@ -665,22 +786,58 @@ async function artistAlbums(id) { // Diskografie: Studioalben zuerst, jeweils ch
   return groups.sort((a, b) => key(a).localeCompare(key(b))).map(albumHit);
 }
 async function albumLoad(g) {
-  const [{ releases = [] }, { genres = [] }] = await Promise.all([
+  const artist = credit(g['artist-credit']);
+  const [{ releases = [] }, { genres = [] }, apple] = await Promise.all([
     mb('release', { 'release-group': g.id, status: 'official', inc: 'recordings labels', limit: 100 }),
     mb('release-group/' + g.id, { inc: 'genres' }),
+    // Cover von Apple Music als Rückfall: bei neuen Alben fehlt es im Cover Art Archive oft noch
+    itunesAlbums(artist + ' ' + g.title).catch(() => []),
   ]);
+  const same = apple.find(h => h.key === albumKey(g.title, artist));
   // ponytail: Erstveröffentlichung (genau am Datum der Albumgruppe, sonst die früheste) = meist die Originalfassung ohne Bonustitel;
   // nur die erste Seite (bis 100) wird angesehen, sonst Titelliste von Hand kürzen
   const key = r => r.date === g['first-release-date'] ? '0' : r.date || '9';
   const rel = releases.filter(r => r.media?.some(m => m.tracks?.length)).sort((a, b) => key(a).localeCompare(key(b)))[0];
   return {
     fields: albumFields({
-      title: g.title, artist: credit(g['artist-credit']), date: g['first-release-date'],
+      title: g.title, artist, date: g['first-release-date'],
       label: rel?.['label-info']?.map(l => l.label?.name).find(n => n && n !== '[no label]'),
       genres: genres.sort((a, b) => b.count - a.count).slice(0, 3).map(x => x.name),
       tracks: (rel?.media || []).flatMap(m => m.tracks || []).map(t => ({ title: t.title, ms: t.length ?? t.recording?.length })),
     }),
-    covers: [['Album-Cover.jpg', `https://coverartarchive.org/release-group/${g.id}/front`]], // Original in voller Auflösung
+    covers: [['Album-Cover.jpg', `https://coverartarchive.org/release-group/${g.id}/front`], ...itunesCovers(same?.art)], // Original in voller Auflösung
+  };
+}
+// Apple Music (iTunes-Suche), frei, ohne Key und sehr aktuell. Als JSONP (Skript statt fetch): die Suche schickt CORS nur sporadisch,
+// ein Skript darf der Browser immer laden, auch aus file://. let, damit der Selbsttest es ersetzen kann
+let itunes = (path, params) => new Promise((resolve, reject) => {
+  const cb = 'itunes' + Math.random().toString(36).slice(2), s = document.createElement('script');
+  const done = () => { window[cb] = () => {}; s.remove(); clearTimeout(timer); }; // spät eintreffende Antwort ins Leere laufen lassen
+  const timer = setTimeout(() => { done(); reject(new Error('Apple Music: keine Antwort.')); }, 10000);
+  window[cb] = d => { done(); resolve(d); };
+  s.onerror = () => { done(); reject(new TypeError('Apple Music')); };
+  s.src = `https://itunes.apple.com/${path}?` + new URLSearchParams({ ...params, callback: cb });
+  document.head.append(s);
+});
+const appleTitle = t => (t || '').replace(/ - (EP|Single)$/, '');
+async function itunesAlbums(q) {
+  const { results = [] } = await itunes('search', { term: q, media: 'music', entity: 'album', limit: 25 });
+  return results.filter(r => r.collectionId && !/ - Single$/.test(r.collectionName)).map(r => ({ name: appleTitle(r.collectionName),
+    key: albumKey(appleTitle(r.collectionName), r.artistName), art: r.artworkUrl100, load: () => itunesAlbum(r.collectionId),
+    info: [r.artistName, r.releaseDate?.slice(0, 4), 'Apple Music'].filter(Boolean).join(' · ') }));
+}
+// Cover: "…/100x100bb.jpg" durch eine riesige Größe ersetzt liefert das Original (oft 3000 px und mehr), sonst 3000 × 3000
+const itunesCovers = url => url ? ['100000x100000-999.jpg', '3000x3000bb.jpg'].map(f => ['Album-Cover.jpg', url.replace(/[^/]+$/, f)]) : [];
+async function itunesAlbum(id) {
+  const { results = [] } = await itunes('lookup', { id, entity: 'song', limit: 200 });
+  const c = results.find(r => r.wrapperType === 'collection') || {};
+  const songs = results.filter(r => r.wrapperType === 'track').sort((a, b) => a.discNumber - b.discNumber || a.trackNumber - b.trackNumber);
+  return {
+    fields: albumFields({ title: appleTitle(c.collectionName), artist: c.artistName, date: c.releaseDate?.slice(0, 10),
+      // "℗ 2024 Republic Records, a division of UMG" → "Republic Records"
+      label: (c.copyright || '').replace(/^.*?[℗©]\s*(\d{4}\s*)?/, '').split(',')[0].trim(),
+      genres: c.primaryGenreName ? [c.primaryGenreName] : [], tracks: songs.map(t => ({ title: t.trackName, ms: t.trackTimeMillis })) }),
+    covers: itunesCovers(c.artworkUrl100),
   };
 }
 function albumFields(a) {
@@ -704,8 +861,15 @@ async function tvmaze(path) {
 }
 const htmlText = html => new DOMParser().parseFromString((html || '').replace(/<\/p>/gi, '\n'), 'text/html').body.textContent;
 async function tvmazeSearch(q) {
-  return (await tvmaze('search/shows?' + new URLSearchParams({ q }))).map(({ show: s }) => ({ name: s.name, load: () => tvmazeShow(s.id, s.name, s.premiered?.slice(0, 4)),
-    info: [s.premiered?.slice(0, 4), (s.network || s.webChannel)?.name].filter(Boolean).join(' · ') }));
+  return (await tvmaze('search/shows?' + new URLSearchParams({ q }))).map(({ show: s }) => ({ name: s.name, tvmaze: s.id,
+    load: () => tvmazeShow(s.id, s.name, s.premiered?.slice(0, 4)), info: [s.premiered?.slice(0, 4), (s.network || s.webChannel)?.name].filter(Boolean).join(' · ') }));
+}
+// Serien: TVmaze zuerst, dazu Wikidata für alles, was TVmaze nicht findet (Tippfehler, deutsche Titel, angekündigte Serien)
+async function seriesSearch(q) {
+  const [tv, wiki] = await Promise.allSettled([tvmazeSearch(q), wikidataSearch(q, 'series')]);
+  if (tv.status === 'rejected' && wiki.status === 'rejected') throw tv.reason;
+  const hits = tv.value || [], known = new Set(hits.map(h => h.tvmaze));
+  return [...hits, ...(wiki.value || []).filter(h => !known.has(h.tvmaze))].slice(0, 16);
 }
 async function tvmazeShow(id, name = '', year = '') {
   const [s, images, more] = await Promise.all([tvmaze(`shows/${id}?embed=seasons`), tvmaze(`shows/${id}/images`),
@@ -824,7 +988,7 @@ let searchTimer, searchSeq = 0;
 async function searchGames(q) {
   const seq = ++searchSeq;
   let hits;
-  try { hits = await (isAlbum() ? albumSearch(q) : isSeries() ? tvmazeSearch(q) : wikidataSearch(q, isFilm())); }
+  try { hits = await (isAlbum() ? albumSearch(q) : isSeries() ? seriesSearch(q) : wikidataSearch(q, isFilm() ? 'film' : 'game')); }
   catch (err) { if (seq === searchSeq) gameStatus(errText(err)); return; }
   if (seq !== searchSeq) return; // Antwort auf eine ältere Eingabe
   showHits(hits);
@@ -1031,6 +1195,7 @@ if (location.hash === '#selftest') (async () => {
         { ImagePurpose: 'BoxArt', Uri: '//store-images.s-microsoft.com/box', Width: 2160, Height: 2160 },
         { ImagePurpose: 'Logo', Uri: '//store-images.s-microsoft.com/logo', Width: 300, Height: 300 }] }] }] });
       if (u.searchParams.get('list') === 'search') return json({ query: { search: [{ title: 'Q1' }] } });
+      if (u.searchParams.get('action') === 'wbsearchentities') return json({ search: [{ id: 'Q9', description: 'video game series' }] }); // Reihe fällt heraus
       return json({ entities: Object.fromEntries(u.searchParams.get('ids').split('|').map(id => [id, fake[id]])) });
     };
     try {
@@ -1100,6 +1265,18 @@ if (location.hash === '#selftest') (async () => {
       draw(ctx, preview.width / U);
       ok(!state.crowded && state.view.ih >= .45 * format().UH, 'genug Platz fürs Bild in ' + size);
     }
+    // Querformat: jedes Format gedreht, Bild links groß, Text rechts daneben ohne Überlappung, Schrift gedruckt so groß wie im Hochformat
+    const portraitB = plan(ctx, format(), 1).b * format().w;
+    $('orientLandscape').checked = true;
+    ok(Math.abs(plan(ctx, format(), 1).b * format().w - portraitB) < 1e-9, 'Querformat: Schrift wie im Hochformat');
+    for (const size of Object.keys(FORMATS)) {
+      $('size').value = size;
+      draw(ctx, preview.width / U);
+      const F = format(), Q = state.layout, vw = state.view;
+      ok(F.w > F.h && F.px[0] > F.px[1] && F.px[0] * F.px[1] <= 50e6 && !state.crowded && vw.iw >= .45 * U && vw.ih >= .75 * F.UH
+        && Q.x0 > vw.left + vw.iw && Q.title.every(t => Q.x0 + t.w <= Q.r + 1e-6) && Q.titleY < Q.blockTop, 'Querformat ' + size);
+    }
+    $('orientPortrait').checked = true;
     $('size').value = 'a5';
     ok(plan(ctx, format(), 1).b > 1.8 && format().dpi === 300, 'A5: größere Schrift, 300 dpi');
     $('size').value = '70x100';
@@ -1157,8 +1334,10 @@ if (location.hash === '#selftest') (async () => {
         { date: '1969-09-26', 'label-info': [{ label: { name: '[no label]' } }, { label: { name: 'Apple Records' } }],
           media: [{ tracks: [{ title: 'Come Together', length: 259946 }] }, { tracks: [{ title: 'Her Majesty', recording: { length: 23000 } }] }] }],
       genres: [{ name: 'pop', count: 1 }, { name: 'rock', count: 5 }] };
-    const mbUrls = [];
+    const mbUrls = [], realItunes = itunes, appleUrls = [];
     window.fetch = async url => { mbUrls.push(new URL(url)); return new Response(JSON.stringify(mbFake)); };
+    let appleFake = { results: [] };
+    itunes = async (path, params) => { appleUrls.push([path, params]); return appleFake; };
     document.body.dataset.mode = 'album';
     try {
       await searchGames('Abbey AC/DC');
@@ -1191,6 +1370,14 @@ if (location.hash === '#selftest') (async () => {
         const vw = state.view;
         ok(!state.crowded && vw.iw === vw.ih && Math.abs(vw.left + vw.iw / 2 - U / 2) < 1e-9, 'Album passt in ' + size);
       }
+      $('orientLandscape').checked = true; // Querformat: Cover links, Titelliste rechts in der Spalte
+      for (const size of Object.keys(FORMATS)) {
+        $('size').value = size;
+        draw(ctx, preview.width / U);
+        const F = format(), Q = state.layout, vw = state.view;
+        ok(!state.crowded && vw.iw === vw.ih && vw.ih >= .55 * F.UH && Q.x0 > vw.left + vw.iw && Q.x0 + Q.tracks.cw <= Q.r + 1e-6, 'Album quer ' + size);
+      }
+      $('orientPortrait').checked = true;
       $('size').value = '50x70';
       ok(plan(ctx, format(), 1).ih === .8 * CW, 'Album 50 × 70: Cover in voller Größe');
       $('tracks').value = 'Kurz 1:00';
@@ -1200,7 +1387,27 @@ if (location.hash === '#selftest') (async () => {
       ctx.font = font(400, T.fs);
       ok(T.fs < 18 && T.fs >= 11 && ctx.measureText('Bittersweet Poetry (feat. John Mayer)').width <= T.tracks.cw - 1.78 * T.fs - ctx.measureText('4:32').width - .67 * T.fs + 1e-6,
         'lange Titel: Schrift verkleinert, nichts abgeschnitten (' + T.fs.toFixed(1) + ')');
-    } finally { window.fetch = realFetch; document.body.dataset.mode = 'game'; }
+      // Apple Music: neue Alben, die MusicBrainz fehlen; doppelte (gleicher Titel und Künstler) nur einmal; Singles nicht
+      const art = 'https://is1-ssl.mzstatic.com/image/thumb/Music/x/100x100bb.jpg';
+      appleFake = { results: [{ collectionId: 7, collectionName: 'Abbey Road', artistName: 'The Beatles', artworkUrl100: art },
+        { collectionId: 8, collectionName: 'Brand New - EP', artistName: 'Neue Band', releaseDate: '2026-09-01T07:00:00Z', artworkUrl100: art },
+        { collectionId: 9, collectionName: 'Hit - Single', artistName: 'Neue Band' }] };
+      const both = await albumSearch('abbey');
+      ok(both.map(h => h.name + '/' + h.info).join('|') === 'Abbey Road/The Beatles · 1969|Brand New/Neue Band · 2026 · Apple Music', 'Apple Music ergänzt MusicBrainz');
+      const withApple = await albumLoad(mbFake['release-groups'][0]);
+      ok(withApple.covers.map(c => c[1].split('/').at(-1)).join() === 'front,100000x100000-999.jpg,3000x3000bb.jpg', 'Cover-Rückfall Apple Music');
+      appleFake = { results: [{ wrapperType: 'collection', collectionName: 'Brand New - EP', artistName: 'Neue Band', releaseDate: '2026-09-01T07:00:00Z',
+        copyright: '℗ 2026 Neues Label, a division of X', primaryGenreName: 'Hip-Hop/Rap', artworkUrl100: art },
+        { wrapperType: 'track', trackName: 'Zwei', discNumber: 1, trackNumber: 2, trackTimeMillis: 61000 },
+        { wrapperType: 'track', trackName: 'Eins', discNumber: 1, trackNumber: 1, trackTimeMillis: 200000 }] };
+      const ap = await itunesAlbum(8);
+      ok(ap.fields.title === 'Brand New' && ap.fields.subtitle === 'Neue Band' && ap.fields.company === 'Neues Label' && ap.fields.genres === 'Hip-Hop/Rap'
+        && ap.fields.tracks === 'Eins 3:20\nZwei 1:01' && ap.fields.year === '2026' && ap.fields.day === 'Sep 1' && ap.covers.length === 2, 'Apple-Music-Album');
+      // MusicBrainz ohne Treffer: unscharf nochmal
+      mbFake['release-groups'] = [];
+      await albumSearch('rammstien');
+      ok(mbUrls.at(-1).searchParams.get('query').startsWith('+((releasegroup:rammstien~ OR artist:rammstien~))'), 'MusicBrainz unscharf');
+    } finally { window.fetch = realFetch; itunes = realItunes; document.body.dataset.mode = 'game'; }
     $('games').replaceChildren();
 
     // Film & Serie: Wikidata-Film (Regie, Laufzeit, bekannteste zuerst), TVmaze-Serie (Sender, Staffeln, Szenenbild vor Plakat)
@@ -1228,27 +1435,46 @@ if (location.hash === '#selftest') (async () => {
       if (u.hostname.endsWith('wikipedia.org')) return json({ extract: 'Toy Story is a 1995 film.', originalimage: { source: 'https://upload.wikimedia.org/ts.jpg' } });
       if (u.hostname === 'uts-api.itunes.apple.com') return json(/\/(movies\/umc\.cmc\.ts|shows\/umc\.cmc\.bb)$/.test(u.pathname) && u.searchParams.get('utsk') ? { data: appleData } : {});
       if (u.searchParams.get('srsearch') === 'haswbstatement:P8600=169') return json({ query: { search: [{ title: 'S1' }] } });
-      if (u.searchParams.get('list') === 'search') return json({ query: { search: [{ title: 'F4' }, { title: 'F1' }] } });
+      // Volltext mit Klasse: Filme nur bei Film-Klassen; Titelsuche: ein angekündigter Film, Homers Gedicht (fällt heraus), eine Serie
+      if (u.searchParams.get('list') === 'search') return json({ query: { search: u.searchParams.get('srsearch').includes('P31=Q11424') ? [{ title: 'F4' }, { title: 'F1' }] : [] } });
+      if (u.searchParams.get('action') === 'wbsearchentities') return json({ search: /odys/.test(u.searchParams.get('search'))
+        ? [{ id: 'P1', description: 'epic poem attributed to Homer' }, { id: 'F9', description: '2026 film by Christopher Nolan' }]
+        : /sever/.test(u.searchParams.get('search')) ? [{ id: 'S2', description: 'American television series' }] : [] });
       const ents = { F1: film('F1'), F4: film('F4'), D1: { labels: { en: { value: 'John Lasseter' } } }, G1: { labels: { en: { value: 'animated film' } } },
-        S1: { claims: { P9751: [v('umc.cmc.bb')] } } };
+        S1: { claims: { P9751: [v('umc.cmc.bb')] } },
+        P1: { labels: { en: { value: 'Odyssey' } }, descriptions: { en: { value: 'epic poem attributed to Homer' } }, sitelinks: { a: {}, b: {}, c: {} } },
+        F9: { labels: { en: { value: 'The Odyssey' } }, aliases: { de: [{ value: 'Die Odyssee' }] }, descriptions: { en: { value: '2026 film by Christopher Nolan' } },
+          claims: { P31: [v({ id: 'Q18011172' })], P577: [v({ time: '+2026-07-17T00:00:00Z', precision: 11 })] } },
+        S2: { labels: { en: { value: 'Severance' } }, descriptions: { en: { value: 'American television series' } },
+          claims: { P449: [v({ id: 'N1' })], P580: [v({ time: '+2022-02-18T00:00:00Z', precision: 11 })], P2437: [v({ amount: '+2', unit: '1' })] } },
+        N1: { labels: { en: { value: 'Apple TV+' } } } };
       return json({ entities: Object.fromEntries(u.searchParams.get('ids').split('|').map(id => [id, ents[id]])) });
     };
     document.body.dataset.mode = 'film';
     try {
       await searchGames('toy story');
-      ok($('games').firstChild.textContent === 'Toy Story1995' && urls.at(-1).searchParams.get('ids') === 'F4|F1'
-        && urls.find(u => u.searchParams.get('list') === 'search').searchParams.get('srsearch').includes('P31=Q20650540'), 'Filmsuche: bekanntester zuerst');
-      const f = await wikidataGame(film('F1'), true);
+      ok($('games').firstChild.textContent === 'Toy Story1995' && urls.at(-1).searchParams.get('ids') === 'F1|F4'
+        && urls.find(u => u.searchParams.get('list') === 'search').searchParams.get('srsearch').includes('P31=Q20650540'), 'Filmsuche: genauer Titel zuerst');
+      await searchGames('the odyssee');
+      ok([...$('games').children].map(b => b.textContent).join('|') === 'The Odyssey2026|Toy Story1995|Toy Story 42019'
+        && urls.some(u => u.searchParams.get('srsearch')?.startsWith('the odyssee~ ')), 'neuer Film über Titelsuche, Gedicht nicht, Tippfehler unscharf');
+      await searchGames('die odyssee');
+      ok($('games').firstChild.textContent === 'The Odyssey2026', 'deutscher Titel (Alias) zuerst');
+      const f = await wikidataGame(film('F1'), 'film');
       ok(f.fields.company === 'John Lasseter' && f.fields.runtime === '81 Min.' && f.fields.genres === 'Animated' && f.fields.day === 'Nov 22'
         && f.logos.map(l => l[0]).join() === 'AppleTV-Logo.png', 'Filmfelder (Regie, Laufzeit, kein Steam-Logo)');
       ok(f.pics.map(p => `${p.src} ${p.url} ${p.w}`).join() === 'Apple TV https://mz/art/4320x3240sr.jpg 4320,Apple TV https://mz/poster/2000x3000sr.jpg 2000,'
         + 'Apple TV https://mz/trailer/3840x1598sr.jpg 3840,Apple TV https://mz/anbieter/2000x3000sr.jpg 2000,Wikipedia https://upload.wikimedia.org/ts.jpg 0'
         && f.pics[0].thumb === 'https://mz/art/400x300sr.jpg' && f.logos[0][1] === 'https://mz/logo/4317x461sr.png', 'Film: alle Apple-TV-Bilder in Originalgröße');
-      const f4 = await wikidataGame(film('F4'), true); // ohne Apple-TV-Nummer: nur Wikipedia
+      const f4 = await wikidataGame(film('F4'), 'film'); // ohne Apple-TV-Nummer: nur Wikipedia
       ok(f4.pics.map(p => p.url).join() === 'https://upload.wikimedia.org/ts.jpg' && !f4.logos.length, 'Film ohne Apple TV');
       $('kindSeries').checked = true;
       await searchGames('breaking bad');
       ok($('games').textContent === 'Breaking Bad2008 · AMC', 'TVmaze-Suche');
+      await searchGames('severance');
+      ok([...$('games').children].map(b => b.textContent).join('|') === 'Breaking Bad2008 · AMC|Severance2022', 'Serie aus Wikidata ergänzt');
+      const sv = await wikidataGame((await wd({ action: 'wbgetentities', ids: 'S2' })).entities.S2, 'series');
+      ok(sv.fields.company === 'Apple TV+' && sv.fields.runtime === '2' && sv.fields.year === '2022' && sv.fields.day === 'Feb 18', 'Seriendaten aus Wikidata');
       const t = await tvmazeShow(169);
       ok(t.fields.title === 'Breaking Bad' && t.fields.company === 'AMC' && t.fields.runtime === '2' && t.fields.genres === 'Drama\nCrime'
         && t.fields.desc === 'Breaking Bad follows a teacher.' && t.fields.year === '2008' && t.fields.day === 'Jan 20'
